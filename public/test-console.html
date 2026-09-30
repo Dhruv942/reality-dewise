@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRM API Test Console</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; display: grid; grid-template-columns: 1fr 420px; height: 100vh; }
+  main { overflow: auto; padding: 12px 16px; }
+  aside { border-left: 1px solid #ccc; padding: 12px; overflow: auto; background: #fafafa; }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  h2 { font-size: 13px; margin: 18px 0 6px; text-transform: uppercase; color: #555; }
+  form { border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin: 0 0 8px; background: #fff; }
+  form b { display: block; margin-bottom: 4px; }
+  label { display: inline-block; margin: 2px 8px 2px 0; font-size: 12px; color: #444; }
+  input, select { display: block; padding: 3px 5px; font: inherit; min-width: 150px; }
+  button { margin-top: 4px; padding: 4px 12px; cursor: pointer; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; margin: 0 0 12px; }
+  .ok { color: #0a7a2f; } .err { color: #b3261e; }
+  #token { width: 100%; box-sizing: border-box; font-size: 11px; }
+  small { color: #777; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CRM API Test Console <small>(dev only)</small></h1>
+  <div>Token (set automatically on login, or paste one): <input id="token" placeholder="not logged in"></div>
+  <datalist id="ids"></datalist>
+  <div id="forms"></div>
+</main>
+<aside>
+  <b>Responses</b> <button onclick="out.textContent=''">clear</button>
+  <div id="out"></div>
+</aside>
+<script>
+const out = document.getElementById('out');
+const tokenInput = document.getElementById('token');
+tokenInput.value = sessionStorage.getItem('token') || '';
+tokenInput.onchange = () => sessionStorage.setItem('token', tokenInput.value.trim());
+
+const T = 'text', B = 'bool';
+const STATUSES = ['NEW', 'CONTACTED', 'SITE_VISIT', 'NEGOTIATION', 'WON', 'LOST'];
+// field: [name, kind, extra]. kind: text | bool | ['opt1','opt2'] (select). extra 'path' = goes in the URL, 'id' = suggests known ids
+const F = (name, kind = T, extra = '') => ({ name, kind, extra });
+
+const sections = [
+  ['1. Login', [
+    ['Admin login', 'POST', '/auth/admin/login', [F('email'), F('password')], 'login'],
+    ['Executive login', 'POST', '/auth/executive/login', [F('email'), F('password')], 'login'],
+    ['Who am I', 'GET', '/auth/me', []],
+  ]],
+  ['2. Teams & executives (admin)', [
+    ['Create team', 'POST', '/admin/teams', [F('name'), F('description')]],
+    ['List teams', 'GET', '/admin/teams', []],
+    ['Create executive', 'POST', '/admin/executives', [F('name'), F('email'), F('phone'), F('username'), F('password'), F('teamId', T, 'id')]],
+    ['List executives', 'GET', '/admin/executives', []],
+    ['Activate / deactivate executive', 'PATCH', '/admin/executives/{id}/status', [F('id', T, 'path id'), F('isActive', B)]],
+    ['Put executive in team', 'PATCH', '/admin/executives/{id}/team', [F('id', T, 'path id'), F('teamId', T, 'id')]],
+    ['Team members', 'GET', '/admin/teams/{id}/executives', [F('id', T, 'path id')]],
+  ]],
+  ['3. Property (admin)', [
+    ['Create property', 'POST', '/admin/properties', [F('name'), F('externalPropertyId'), F('source', ['99ACRES', 'MAGICBRICKS']), F('description'), F('location'), F('teamId', T, 'id'), F('primaryExecutiveId', T, 'id')]],
+    ['List properties', 'GET', '/admin/properties', []],
+    ['Set property team', 'PATCH', '/admin/properties/{id}/team', [F('id', T, 'path id'), F('teamId', T, 'id')]],
+    ['Set primary executive', 'PATCH', '/admin/properties/{id}/executive', [F('id', T, 'path id'), F('executiveId', T, 'id')]],
+    ['Remove primary executive', 'DELETE', '/admin/properties/{id}/executive', [F('id', T, 'path id')]],
+    ['Activate / deactivate property', 'PATCH', '/admin/properties/{id}/status', [F('id', T, 'path id'), F('isActive', B)]],
+    ['Property details', 'GET', '/admin/properties/{id}', [F('id', T, 'path id')]],
+    ['Assignment history', 'GET', '/admin/properties/{id}/assignment-history', [F('id', T, 'path id')]],
+  ]],
+  ['4. Enquiry / leads (admin)', [
+    ['Send enquiry (creates customer + lead + assigns)', 'POST', '/admin/leads', [F('name'), F('mobile'), F('email'), F('propertyId', T, 'id'), F('message')]],
+    ['List all leads', 'GET', '/admin/leads', []],
+    ['List customers', 'GET', '/admin/customers', []],
+  ]],
+  ['5. Executive view (login as executive first)', [
+    ['My leads', 'GET', '/executive/leads', []],
+    ['Update my lead status', 'PATCH', '/executive/leads/{id}/status', [F('id', T, 'path id'), F('status', STATUSES)]],
+  ]],
+];
+
+// Remember every {id, name} seen in responses so id fields can suggest them.
+const known = new Map();
+function collect(v) {
+  if (Array.isArray(v)) return v.forEach(collect);
+  if (v && typeof v === 'object') {
+    if (typeof v.id === 'string' && (v.name || v.username)) known.set(v.id, v.name || v.username);
+    Object.values(v).forEach(collect);
+  }
+}
+function refreshIds() {
+  const dl = document.getElementById('ids');
+  dl.replaceChildren(...[...known].map(([id, name]) => Object.assign(document.createElement('option'), { value: id, label: name })));
+}
+
+function el(tag, props = {}, ...kids) {
+  const e = Object.assign(document.createElement(tag), props);
+  kids.forEach((k) => e.append(k));
+  return e;
+}
+
+async function run(method, pathTpl, fields, kind, values) {
+  let path = pathTpl;
+  const body = {};
+  const pathVars = fields.filter((f) => f.extra.includes('path'));
+  for (const f of fields) {
+    const v = values[f.name];
+    if (f.extra.includes('path')) path = path.replace(`{${f.name}}`, encodeURIComponent(v));
+    else if (v !== '' && v !== undefined) body[f.name] = f.kind === B ? v === 'true' : v;
+  }
+  const headers = {};
+  const hasBody = method !== 'GET' && method !== 'DELETE' && fields.length > pathVars.length;
+  if (hasBody) headers['content-type'] = 'application/json';
+  if (tokenInput.value.trim()) headers.authorization = 'Bearer ' + tokenInput.value.trim();
+
+  let status = 'network error', data;
+  try {
+    const res = await fetch('/api/v1' + path, { method, headers, body: hasBody ? JSON.stringify(body) : undefined });
+    status = res.status;
+    data = await res.json().catch(() => null);
+  } catch (e) { data = String(e); }
+
+  if (kind === 'login' && data && data.accessToken) {
+    tokenInput.value = data.accessToken;
+    sessionStorage.setItem('token', data.accessToken);
+  }
+  collect(data);
+  refreshIds();
+  const okay = typeof status === 'number' && status < 400;
+  out.prepend(el('pre', {}, el('b', { className: okay ? 'ok' : 'err' }, `${status}  `), `${method} /api/v1${path}\n${JSON.stringify(data, null, 2)}`));
+}
+
+const root = document.getElementById('forms');
+for (const [title, forms] of sections) {
+  root.append(el('h2', {}, title));
+  for (const [label, method, path, fields, kind] of forms) {
+    const inputs = {};
+    const form = el('form', {}, el('b', {}, `${label} `, el('small', {}, `${method} ${path}`)));
+    for (const f of fields) {
+      let input;
+      if (Array.isArray(f.kind)) input = el('select', {}, ...f.kind.map((o) => el('option', { value: o }, o)));
+      else if (f.kind === B) input = el('select', {}, el('option', { value: 'true' }, 'true'), el('option', { value: 'false' }, 'false'));
+      else { input = el('input', { type: f.name.toLowerCase().includes('password') ? 'password' : 'text', autocomplete: 'off' }); if (f.extra.includes('id')) input.setAttribute('list', 'ids'); }
+      inputs[f.name] = input;
+      form.append(el('label', {}, f.name, input));
+    }
+    form.append(el('button', { type: 'submit' }, 'Send'));
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      run(method, path, fields, kind, Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])));
+    };
+    root.append(form);
+  }
+}
+</script>
+</body>
+</html>
