@@ -30,6 +30,11 @@ export const authenticate = (): RequestHandler => async (req, _res, next) => {
     if (!user || !user.is_active || user.role !== payload.role) {
       throw new UnauthorizedError('Invalid token');
     }
+    // A password change ends every session started at or before it. JWT `iat` has 1-second resolution,
+    // so `<=` closes the same-second window (a token issued in that second must simply be re-issued).
+    if (user.password_changed_at && payload.iat <= Math.floor(user.password_changed_at.getTime() / 1000)) {
+      throw new UnauthorizedError('Session expired, please log in again');
+    }
 
     req.user = toPublicUser(user);
     next();

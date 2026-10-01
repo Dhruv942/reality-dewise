@@ -8,6 +8,11 @@ export interface AccessTokenPayload {
   role: UserRole;
 }
 
+export interface VerifiedAccessToken extends AccessTokenPayload {
+  /** Issued-at, seconds since epoch. */
+  iat: number;
+}
+
 const ALGORITHM = 'HS256';
 
 export const signAccessToken = (payload: AccessTokenPayload): string =>
@@ -18,10 +23,10 @@ export const signAccessToken = (payload: AccessTokenPayload): string =>
   });
 
 /** Throws jsonwebtoken's TokenExpiredError / JsonWebTokenError on failure. */
-export function verifyAccessToken(token: string): AccessTokenPayload {
+export function verifyAccessToken(token: string): VerifiedAccessToken {
   const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: [ALGORITHM] });
-  if (typeof decoded === 'string' || typeof decoded.sub !== 'string' || typeof decoded.role !== 'string') {
+  if (typeof decoded === 'string' || typeof decoded.sub !== 'string' || typeof decoded.role !== 'string' || typeof decoded.iat !== 'number') {
     throw new jwt.JsonWebTokenError('invalid payload');
   }
-  return { sub: decoded.sub, role: decoded.role as UserRole };
+  return { sub: decoded.sub, role: decoded.role as UserRole, iat: decoded.iat };
 }

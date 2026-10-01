@@ -47,7 +47,9 @@ export const updateProfile = (
   f: { name?: string; email?: string; phone?: string | null; username?: string; team_id?: string | null },
 ) => patchRow('users', id, f);
 
-export const setPasswordHash = (id: string, hash: string) => patchRow('users', id, { password_hash: hash });
+/** Also stamps password_changed_at: tokens issued before it stop working. */
+export const setPasswordHash = (id: string, hash: string) =>
+  patchRow('users', id, { password_hash: hash, password_changed_at: new Date() });
 export const setActive = (id: string, isActive: boolean) => patchRow('users', id, { is_active: isActive });
 export const setTeam = (id: string, teamId: string | null) => patchRow('users', id, { team_id: teamId });
 

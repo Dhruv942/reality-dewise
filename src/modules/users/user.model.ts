@@ -13,6 +13,7 @@ export interface UserRecord {
   is_active: boolean;
   team_id: string | null;
   deleted_at: Date | null;
+  password_changed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

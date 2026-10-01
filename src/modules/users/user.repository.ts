@@ -23,7 +23,7 @@ export async function upsertByEmail(u: NewUser): Promise<UserRecord> {
      VALUES ($1, lower($2), lower($3), $4, $5, $6)
      ON CONFLICT (email) DO UPDATE
        SET name = EXCLUDED.name, username = EXCLUDED.username, phone = EXCLUDED.phone,
-           password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, is_active = true, deleted_at = NULL
+           password_hash = EXCLUDED.password_hash, password_changed_at = now(), role = EXCLUDED.role, is_active = true, deleted_at = NULL
      RETURNING *`,
     [u.name, u.email, u.username, u.phone ?? null, u.passwordHash, u.role],
   );
