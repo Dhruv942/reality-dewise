@@ -1,4 +1,6 @@
 import type { RequestHandler } from 'express';
+// Pulls in the `req.user` type augmentation even when only files reachable from the entrypoint are compiled.
+import type {} from './auth.types';
 import jwt from 'jsonwebtoken';
 import { ForbiddenError, UnauthorizedError } from '../../utils/errors';
 import { verifyAccessToken } from '../../utils/jwt';
