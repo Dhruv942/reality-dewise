@@ -7,7 +7,7 @@ export const list = async (req: Request, res: Response) => {
   res.json(await service.listCustomers(parse(listCustomersQuery, req.query)));
 };
 export const get = async (req: Request, res: Response) => {
-  res.json(await service.getCustomerDetails(parse(idParam, req.params).id));
+  res.json(await service.getCustomerDetails(parse(idParam, req.params).id, req.user?.id));
 };
 export const update = async (req: Request, res: Response) => {
   res.json(await service.updateCustomer(parse(idParam, req.params).id, req.body));

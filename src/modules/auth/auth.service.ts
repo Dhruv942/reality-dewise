@@ -10,11 +10,15 @@ export interface LoginResult {
 }
 
 /**
- * Authenticates a user for a specific role portal. Unknown email, wrong password,
+ * Authenticates a user for a specific role portal. Unknown email/username, wrong password,
  * inactive account and wrong role all yield the same error so nothing is leaked.
  */
-export async function login(role: UserRole, email: string, password: string): Promise<LoginResult> {
-  const user = await users.findByEmail(email);
+export async function login(
+  role: UserRole,
+  who: { email?: string; username?: string },
+  password: string,
+): Promise<LoginResult> {
+  const user = who.email ? await users.findByEmail(who.email) : await users.findByUsername(who.username ?? '');
 
   // Always run one hash verification so response time doesn't reveal whether the email exists.
   const passwordOk = await verifyPassword(user?.password_hash ?? (await getDummyHash()), password);

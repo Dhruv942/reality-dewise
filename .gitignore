@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 .env.test
+.DS_Store
+*.log
+coverage

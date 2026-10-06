@@ -36,17 +36,17 @@ const login = async (portal: 'admin' | 'executive', creds: object) =>
 
 before(async () => {
   await pool.query('TRUNCATE users, teams CASCADE');
-  const mk = async (u: typeof ADMIN, name: string, role: 'ADMIN' | 'EXECUTIVE') =>
+  const mk = async (u: typeof ADMIN, name: string, role: 'ADMIN' | 'SALES') =>
     upsertByEmail({ name, email: u.email, username: u.email.split('@')[0], passwordHash: await hashPassword(u.password), role });
   adminId = (await mk(ADMIN, 'Admin', 'ADMIN')).id;
-  execId = (await mk(EXEC, 'Amit', 'EXECUTIVE')).id;
-  const gone = await mk(INACTIVE, 'Gone', 'EXECUTIVE');
+  execId = (await mk(EXEC, 'Amit', 'SALES')).id;
+  const gone = await mk(INACTIVE, 'Gone', 'SALES');
   await pool.query('UPDATE users SET is_active = false WHERE id = $1', [gone.id]);
 
   // Admin-only endpoint that exists only for tests, to prove role protection.
   const app = createApp((api) => {
     api.get('/_test/admin-only', authenticate(), authorizeRoles('ADMIN'), (_req, res) => res.json({ ok: true }));
-    api.get('/_test/exec-only', authenticate(), authorizeRoles('EXECUTIVE'), (_req, res) => res.json({ ok: true }));
+    api.get('/_test/exec-only', authenticate(), authorizeRoles('SALES'), (_req, res) => res.json({ ok: true }));
   });
   server = app.listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -61,10 +61,10 @@ describe('login + /me', () => {
   it('admin: login -> JWT -> /me', async () => {
     const r = await login('admin', ADMIN);
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.user, { id: adminId, name: 'Admin', email: ADMIN.email, role: 'ADMIN' });
+    assert.deepEqual(r.body.user, { id: adminId, name: 'Admin', email: ADMIN.email, role: 'ADMIN', designation: null });
     const me = await call('/api/v1/auth/me', { token: r.body.accessToken });
     assert.equal(me.status, 200);
-    assert.deepEqual(me.body, { id: adminId, name: 'Admin', email: ADMIN.email, role: 'ADMIN' });
+    assert.deepEqual(me.body, { id: adminId, name: 'Admin', email: ADMIN.email, role: 'ADMIN', designation: null });
   });
 
   it('executive: login -> JWT -> /me', async () => {
@@ -72,7 +72,7 @@ describe('login + /me', () => {
     assert.equal(r.status, 200);
     const me = await call('/api/v1/auth/me', { token: r.body.accessToken });
     assert.equal(me.status, 200);
-    assert.deepEqual(me.body, { id: execId, name: 'Amit', email: EXEC.email, role: 'EXECUTIVE' });
+    assert.deepEqual(me.body, { id: execId, name: 'Amit', email: EXEC.email, role: 'SALES', designation: 'SALES_EXECUTIVE' });
   });
 
   it('JWT contains only sub, role and timing claims', async () => {
@@ -197,7 +197,7 @@ describe('token rejection', () => {
 });
 
 describe('role protection', () => {
-  it('EXECUTIVE token on ADMIN-only endpoint -> 403', async () => {
+  it('SALES token on ADMIN-only endpoint -> 403', async () => {
     const t = (await login('executive', EXEC)).body.accessToken;
     const r = await call('/api/v1/_test/admin-only', { token: t });
     assert.equal(r.status, 403);
@@ -209,7 +209,7 @@ describe('role protection', () => {
     assert.equal((await call('/api/v1/_test/admin-only', { token: t })).status, 200);
   });
 
-  it('ADMIN token on EXECUTIVE-only endpoint -> 403; EXECUTIVE -> 200', async () => {
+  it('ADMIN token on SALES-only endpoint -> 403; SALES -> 200', async () => {
     const a = (await login('admin', ADMIN)).body.accessToken;
     const e = (await login('executive', EXEC)).body.accessToken;
     assert.equal((await call('/api/v1/_test/exec-only', { token: a })).status, 403);

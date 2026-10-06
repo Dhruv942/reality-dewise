@@ -5,7 +5,7 @@ const UNIQUE_MESSAGES: Record<string, string> = {
   users_email_key: 'Email is already in use',
   users_username_key: 'Username is already in use',
   users_phone_key: 'Phone number is already in use',
-  properties_source_external_property_id_key: 'A property with this source and external ID already exists',
+  properties_name_key_key: 'A property with this name already exists',
   teams_name_lower_key: 'A team with this name already exists',
 };
 

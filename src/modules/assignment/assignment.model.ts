@@ -1,21 +1,11 @@
-export const ASSIGNMENT_TYPES = ['PRIMARY', 'ROUND_ROBIN'] as const;
-export type AssignmentType = (typeof ASSIGNMENT_TYPES)[number];
-
-export const ASSIGNMENT_REASONS = [
-  'PRIMARY_EXECUTIVE_AVAILABLE',
-  'PRIMARY_EXECUTIVE_UNAVAILABLE',
-  'NO_PRIMARY_EXECUTIVE',
-] as const;
-export type AssignmentReason = (typeof ASSIGNMENT_REASONS)[number];
+/** TIMEOUT = the lead stayed INCOMING past the timeout and the system moved it to the next executive. */
+export type AssignmentMethod = 'ROUND_ROBIN' | 'MANUAL' | 'TIMEOUT';
 
 export interface AssignmentResult {
   historyId: string;
   propertyId: string;
-  teamId: string;
   leadId: string;
   executiveId: string;
-  assignmentType: AssignmentType;
-  reason: AssignmentReason;
   /** true when this lead had already been assigned (retry): nothing new was recorded. */
   alreadyAssigned: boolean;
 }
@@ -23,23 +13,23 @@ export interface AssignmentResult {
 export interface AssignmentHistoryRow {
   id: string;
   property_id: string;
-  team_id: string;
   executive_id: string;
-  assignment_type: AssignmentType;
-  reason: AssignmentReason;
   lead_id: string | null;
+  method: AssignmentMethod;
+  assigned_by_id: string | null;
   created_at: Date;
   executive_name?: string;
   executive_username?: string;
+  assigned_by_name?: string | null;
 }
 
 export const toHistoryDto = (h: AssignmentHistoryRow) => ({
   id: h.id,
   propertyId: h.property_id,
-  teamId: h.team_id,
   executive: { id: h.executive_id, name: h.executive_name, username: h.executive_username },
-  assignmentType: h.assignment_type,
-  reason: h.reason,
   leadId: h.lead_id,
+  // ROUND_ROBIN (system) or MANUAL (an admin/manager picked the executive).
+  method: h.method,
+  assignedBy: h.assigned_by_id ? { id: h.assigned_by_id, name: h.assigned_by_name ?? null } : null,
   createdAt: h.created_at,
 });

@@ -7,8 +7,8 @@ import type { LoginInput } from './auth.validation';
 export const loginAs =
   (role: UserRole) =>
   async (req: Request, res: Response): Promise<void> => {
-    const { email, password } = req.body as LoginInput;
-    res.json(await authService.login(role, email, password));
+    const { email, username, password } = req.body as LoginInput;
+    res.json(await authService.login(role, { email, username }, password));
   };
 
 export const me = (req: Request, res: Response): void => {

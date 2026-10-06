@@ -85,6 +85,15 @@ describe('CORS + security headers', () => {
       assert.equal(res.headers.get('access-control-allow-origin'), 'https://crm.example.com');
     } finally { s.close(); }
   });
+  it('preflight allows every method the API uses (PUT /admin/properties/:id/executives, DELETE …/important)', async () => {
+    const { s, base } = listen(createApp());
+    try {
+      for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+        const pre = await fetch(`${base}/api/v1/admin/leads`, { method: 'OPTIONS', headers: { origin: 'https://crm.example.com', 'access-control-request-method': method } });
+        assert.ok((pre.headers.get('access-control-allow-methods') ?? '').split(',').includes(method), method);
+      }
+    } finally { s.close(); }
+  });
   it('does not allow other origins', async () => {
     const { s, base } = listen(createApp());
     try {

@@ -1,4 +1,4 @@
-import type { UserRole } from '../users/user.model';
+import type { UserDesignation, UserRole } from '../users/user.model';
 
 /** users row joined with its team. Deliberately has no password_hash. */
 export interface ExecutiveRow {
@@ -8,6 +8,7 @@ export interface ExecutiveRow {
   phone: string | null;
   username: string;
   role: UserRole;
+  designation: UserDesignation | null;
   is_active: boolean;
   team_id: string | null;
   team_name: string | null;
@@ -24,6 +25,7 @@ export const toExecutiveDto = (e: ExecutiveRow) => ({
   phone: e.phone,
   username: e.username,
   role: e.role,
+  designation: e.designation,
   isActive: e.is_active,
   team: e.team_id ? { id: e.team_id, name: e.team_name, isActive: e.team_is_active } : null,
   createdAt: e.created_at,

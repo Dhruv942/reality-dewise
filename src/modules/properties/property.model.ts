@@ -3,34 +3,36 @@ export type PropertySource = (typeof PROPERTY_SOURCES)[number];
 
 export interface PropertyRow {
   id: string;
-  external_property_id: string;
-  source: PropertySource;
   name: string;
   description: string | null;
   location: string | null;
   is_active: boolean;
-  team_id: string | null;
-  team_name: string | null;
-  team_is_active: boolean | null;
-  primary_executive_id: string | null;
-  primary_executive_name: string | null;
-  primary_executive_is_active: boolean | null;
+  is_stub: boolean;
+  executive_count: number;
+  pending_lead_count: number;
   created_at: Date;
   updated_at: Date;
 }
 
+export interface PropertyExecutiveRow {
+  id: string;
+  name: string;
+  username: string;
+  is_active: boolean;
+}
+
 export const toPropertyDto = (p: PropertyRow) => ({
   id: p.id,
-  externalPropertyId: p.external_property_id,
-  source: p.source,
   name: p.name,
   description: p.description,
   location: p.location,
   isActive: p.is_active,
-  team: p.team_id ? { id: p.team_id, name: p.team_name, isActive: p.team_is_active } : null,
-  primaryExecutive: p.primary_executive_id
-    ? { id: p.primary_executive_id, name: p.primary_executive_name, isActive: p.primary_executive_is_active }
-    : null,
+  // Created automatically from a lead's property name; an admin can fill in details later.
+  isStub: p.is_stub,
+  assignedExecutiveCount: p.executive_count,
+  // true => leads for this property are saved as PENDING_ASSIGNMENT until executives are assigned.
+  needsAssignment: p.executive_count === 0,
+  pendingLeadCount: p.pending_lead_count,
   createdAt: p.created_at,
   updatedAt: p.updated_at,
 });

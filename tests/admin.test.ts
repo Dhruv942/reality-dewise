@@ -41,7 +41,7 @@ before(async () => {
 after(async () => { server.close(); await pool.end(); });
 
 describe('access control', () => {
-  it('no token -> 401, EXECUTIVE token -> 403 on admin routes', async () => {
+  it('no token -> 401, SALES token -> 403 on admin routes', async () => {
     await newExec('gate');
     execToken = (await login('executive', 'gate@test.com', 'TempPass123')).body.accessToken;
     for (const path of ['/admin/teams', '/admin/executives']) {
@@ -114,7 +114,8 @@ describe('executives', () => {
     amit = r.body;
     assert.equal(amit.email, 'amit@test.com');
     assert.equal(amit.username, 'amit.patel');
-    assert.equal(amit.role, 'EXECUTIVE');
+    assert.equal(amit.role, 'SALES');
+    assert.equal(amit.designation, 'SALES_EXECUTIVE');
     assert.equal(amit.isActive, true);
     assert.equal(amit.team, null);
     assert.ok(!JSON.stringify(amit).includes('password'));
@@ -157,7 +158,7 @@ describe('executives', () => {
     assert.equal((await call(`/admin/executives/${adminId}`)).status, 400);
   });
   it('list + filters', async () => {
-    assert.ok(!(await call('/admin/executives')).body.some((e: any) => e.role !== 'EXECUTIVE'), 'admins never listed');
+    assert.ok(!(await call('/admin/executives')).body.some((e: any) => e.role !== 'SALES'), 'admins never listed');
     assert.deepEqual((await call(`/admin/executives?teamId=${teamA}`)).body.map((e: any) => e.username), ['rahul']);
     assert.equal((await call('/admin/executives?search=9876543')).body[0].username, 'amit.patel');
     assert.equal((await call('/admin/executives?isActive=false')).body.length, 0);
@@ -262,7 +263,7 @@ describe('team assignment', () => {
     assert.equal((await call(`/admin/executives/${priya.id}/team`, 'PATCH', { teamId: '00000000-0000-0000-0000-000000000000' })).status, 400);
     assert.equal((await call(`/admin/executives/${priya.id}/team`, 'PATCH', {})).status, 400);
   });
-  it('assign non-EXECUTIVE user (admin) -> rejected, and DB constraint backs it up', async () => {
+  it('assign non-sales user (admin) -> rejected, and DB constraint backs it up', async () => {
     const r = await call(`/admin/executives/${adminId}/team`, 'PATCH', { teamId: team });
     assert.equal(r.status, 400);
     assert.equal(r.body.message, 'User is not an executive');

@@ -1,191 +1,116 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { pool } from '../src/database/pool';
 import { startTestApp, ZERO } from './helpers';
 
 let t: Awaited<ReturnType<typeof startTestApp>>;
-let teamA: any, teamB: any, amit: any, rahul: any, bob: any;
+let team: any, amit: any, rahul: any;
 
 before(async () => {
   t = await startTestApp();
-  teamA = await t.team('Team A');
-  teamB = await t.team('Team B');
-  amit = await t.exec('amit', teamA.id);
-  rahul = await t.exec('rahul', teamA.id);
-  bob = await t.exec('bob', teamB.id);
+  team = await t.team('Team A');
+  amit = await t.exec('amit', team.id);
+  rahul = await t.exec('rahul', team.id);
 });
 after(() => t.close());
 
-const base = { externalPropertyId: 'MB12345', source: '99ACRES', name: 'XYZ Residency', description: '2 BHK residential property', location: 'Ahmedabad' };
+const lead = (extra: object = {}) =>
+  t.call('/admin/leads', 'POST', { name: 'Ravi', mobile: '9876543210', propertyName: 'Green Valley Residency', source: '99ACRES', ...extra });
 
-describe('property CRUD', () => {
-  let id: string;
-
-  it('create manually with team + primary executive', async () => {
-    const r = await t.call('/admin/properties', 'POST', { ...base, teamId: teamA.id, primaryExecutiveId: amit.id });
-    assert.equal(r.status, 201);
-    id = r.body.id;
-    assert.equal(r.body.externalPropertyId, 'MB12345');
-    assert.equal(r.body.source, '99ACRES');
-    assert.equal(r.body.isActive, true);
-    assert.equal(r.body.team.name, 'Team A');
-    assert.equal(r.body.primaryExecutive.name, 'Amit');
+describe('properties are created by leads, not by hand', () => {
+  it('there is no create endpoint', async () => {
+    assert.equal((await t.call('/admin/properties', 'POST', { name: 'X' })).status, 404);
   });
-  it('same external id under another source is a different property', async () => {
-    const r = await t.call('/admin/properties', 'POST', { ...base, source: 'magicbricks' });
-    assert.equal(r.status, 201);
-    assert.equal(r.body.source, 'MAGICBRICKS');
-    assert.equal(r.body.team, null);
-    assert.equal(r.body.primaryExecutive, null);
+  it('a lead for an unknown name creates one stub property flagged as needing executives', async () => {
+    assert.equal((await t.call('/admin/properties')).body.length, 0);
+    assert.equal((await lead()).status, 201);
+    const list = (await t.call('/admin/properties')).body;
+    assert.equal(list.length, 1);
+    assert.equal(list[0].name, 'Green Valley Residency');
+    assert.equal(list[0].isStub, true);
+    assert.equal(list[0].needsAssignment, true);
+    assert.equal(list[0].assignedExecutiveCount, 0);
+    assert.equal(list[0].pendingLeadCount, 1);
   });
-  it('duplicate (source, external id) -> 409', async () => {
-    const r = await t.call('/admin/properties', 'POST', { ...base, name: 'Other' });
-    assert.equal(r.status, 409);
-    assert.equal(r.body.message, 'A property with this source and external ID already exists');
-  });
-  it('create with a team only, and create inactive', async () => {
-    const r = await t.call('/admin/properties', 'POST', { ...base, externalPropertyId: 'T1', teamId: teamA.id, isActive: false });
-    assert.equal(r.status, 201);
-    assert.equal(r.body.primaryExecutive, null);
-    assert.equal(r.body.isActive, false);
-  });
-  it('create validation: source, missing fields, primary without team, extra fields', async () => {
-    const bad = async (body: object) => (await t.call('/admin/properties', 'POST', body)).status;
-    assert.equal(await bad({ ...base, externalPropertyId: 'V1', source: 'HOUSING' }), 400);
-    assert.equal(await bad({ source: '99ACRES' }), 400);
-    assert.equal(await bad({ ...base, externalPropertyId: 'V2', primaryExecutiveId: amit.id }), 400);
-    assert.equal(await bad({ ...base, externalPropertyId: 'V3', id: ZERO }), 400);
-  });
-  it('create rejects primary executive from another team / inactive / unknown; team inactive/unknown', async () => {
-    const mk = async (extra: object) => t.call('/admin/properties', 'POST', { ...base, externalPropertyId: 'R' + Math.random(), ...extra });
-    const wrongTeam = await mk({ teamId: teamA.id, primaryExecutiveId: bob.id });
-    assert.equal(wrongTeam.status, 409);
-    assert.equal(wrongTeam.body.message, "Executive does not belong to the property's team");
-    assert.equal((await mk({ teamId: teamA.id, primaryExecutiveId: ZERO })).status, 400);
-    assert.equal((await mk({ teamId: ZERO })).status, 400);
-    const idle = await t.exec('idle', teamA.id);
-    await t.setActive(idle.id, false);
-    assert.equal((await mk({ teamId: teamA.id, primaryExecutiveId: idle.id })).body.message, 'Executive is inactive');
-    const dead = await t.team('Dead');
-    await t.call(`/admin/teams/${dead.id}/status`, 'PATCH', { isActive: false });
-    assert.equal((await mk({ teamId: dead.id })).status, 409);
-    assert.equal((await t.call('/admin/properties?search=R0.')).body.length, 0, 'no partial rows');
-  });
-  it('get single: team, primary and current active team executives', async () => {
-    const r = await t.call(`/admin/properties/${id}`);
-    assert.equal(r.status, 200);
-    assert.equal(r.body.team.id, teamA.id);
-    assert.equal(r.body.primaryExecutive.id, amit.id);
-    assert.deepEqual(r.body.activeTeamExecutives.map((e: any) => e.username), ['amit', 'rahul']); // idle is inactive
-    assert.equal((await t.call(`/admin/properties/${ZERO}`)).status, 404);
-    assert.equal((await t.call('/admin/properties/xyz')).status, 400);
-  });
-  it('list + filters', async () => {
-    assert.equal((await t.call('/admin/properties')).body.length, 3);
-    assert.equal((await t.call('/admin/properties?source=MAGICBRICKS')).body.length, 1);
-    assert.equal((await t.call(`/admin/properties?teamId=${teamA.id}`)).body.length, 2);
-    assert.equal((await t.call('/admin/properties?isActive=false')).body.length, 1);
-    assert.equal((await t.call('/admin/properties?search=xyz')).body.length, 3);
-    assert.equal((await t.call('/admin/properties?source=NOPE')).status, 400);
-  });
-  it('update details; identity/assignment fields are rejected', async () => {
-    const r = await t.call(`/admin/properties/${id}`, 'PATCH', { name: 'XYZ Heights', location: null });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.name, 'XYZ Heights');
-    assert.equal(r.body.location, null);
-    for (const bad of [{ source: 'MAGICBRICKS' }, { externalPropertyId: 'X' }, { teamId: teamB.id }, { primaryExecutiveId: null }, {}]) {
-      assert.equal((await t.call(`/admin/properties/${id}`, 'PATCH', bad)).status, 400);
-    }
-  });
-  it('deactivate keeps the row', async () => {
-    const r = await t.call(`/admin/properties/${id}/status`, 'PATCH', { isActive: false });
-    assert.equal(r.body.isActive, false);
-    assert.equal((await t.call(`/admin/properties/${id}`)).status, 200);
-    await t.call(`/admin/properties/${id}/status`, 'PATCH', { isActive: true });
-    assert.equal((await t.call(`/admin/properties/${id}/status`, 'PATCH', { isActive: 'x' })).status, 400);
+  it('more leads (any casing/spacing, either portal) reuse the same property: never a duplicate', async () => {
+    await lead({ mobile: '9000000001', propertyName: '  green   VALLEY residency ', source: 'MAGICBRICKS' });
+    await Promise.all(Array.from({ length: 8 }, (_, i) => lead({ mobile: `91000000${10 + i}`, propertyName: 'GREEN VALLEY RESIDENCY' })));
+    const list = (await t.call('/admin/properties')).body;
+    assert.equal(list.length, 1);
+    assert.equal(list[0].pendingLeadCount, 10);
   });
 });
 
-describe('team + primary executive assignment', () => {
+describe('property CRUD', () => {
   let p: any;
-  before(async () => { p = await t.property({ ...base, externalPropertyId: 'ASSIGN1' }); });
+  before(async () => { p = (await t.call('/admin/properties')).body[0]; });
 
-  it('primary executive needs a team first', async () => {
-    const r = await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: amit.id });
-    assert.equal(r.status, 409);
-  });
-  it('assign team (inactive/unknown team rejected)', async () => {
-    assert.equal((await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: ZERO })).status, 400);
-    const dead = (await t.call('/admin/teams?search=Dead')).body[0];
-    assert.equal((await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: dead.id })).status, 409);
-    const r = await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamA.id });
+  it('get single includes its executives', async () => {
+    const r = await t.call(`/admin/properties/${p.id}`);
     assert.equal(r.status, 200);
-    assert.equal(r.body.team.id, teamA.id);
-    assert.equal((await t.call(`/admin/properties/${ZERO}/team`, 'PATCH', { teamId: teamA.id })).status, 404);
+    assert.deepEqual(r.body.executives, []);
+    assert.equal((await t.call(`/admin/properties/${ZERO}`)).status, 404);
+    assert.equal((await t.call('/admin/properties/zzz')).status, 400);
   });
-  it('assign primary executive of the team', async () => {
-    const r = await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: amit.id });
+  it('update details; unknown fields rejected; renaming onto another property is 409', async () => {
+    const other = await t.property('Blue Hills');
+    const r = await t.call(`/admin/properties/${p.id}`, 'PATCH', { location: 'Surat', description: 'Gated' });
+    assert.equal(r.body.location, 'Surat');
+    assert.equal((await t.call(`/admin/properties/${p.id}`, 'PATCH', { name: 'blue  HILLS' })).status, 409);
+    assert.equal((await t.call(`/admin/properties/${other.id}`, 'PATCH', { name: 'Blue Hills Phase 2' })).body.name, 'Blue Hills Phase 2');
+    assert.equal((await t.call(`/admin/properties/${p.id}`, 'PATCH', { source: '99ACRES' })).status, 400);
+    assert.equal((await t.call(`/admin/properties/${p.id}`, 'PATCH', {})).status, 400);
+  });
+  it('list filters: assigned, isActive, search', async () => {
+    assert.equal((await t.call('/admin/properties?assigned=false')).body.length, 2);
+    assert.equal((await t.call('/admin/properties?assigned=true')).body.length, 0);
+    assert.equal((await t.call('/admin/properties?search=green')).body.length, 1);
+    assert.equal((await t.call('/admin/properties?isActive=false')).body.length, 0);
+    assert.equal((await t.call('/admin/properties?assigned=maybe')).status, 400);
+  });
+  it('deactivate / reactivate', async () => {
+    const off = await t.call(`/admin/properties/${p.id}/status`, 'PATCH', { isActive: false });
+    assert.equal(off.body.isActive, false);
+    assert.equal((await lead({ mobile: '9222222222' })).status, 409, 'inactive property takes no leads');
+    assert.equal((await t.call(`/admin/properties/${p.id}/status`, 'PATCH', { isActive: true })).body.isActive, true);
+    assert.equal((await t.call(`/admin/properties/${p.id}/status`, 'PATCH', { isActive: 'yes' })).status, 400);
+  });
+});
+
+describe('hand-picked executives', () => {
+  let p: any;
+  before(async () => { p = (await t.call('/admin/properties?search=green')).body[0]; });
+  const put = (body: unknown, id = p.id) => t.call(`/admin/properties/${id}/executives`, 'PUT', body);
+
+  it('validation: unknown / inactive / admin user / bad ids / extra fields / property unknown', async () => {
+    const off = await t.exec('off.exec', team.id);
+    await t.setActive(off.id, false);
+    assert.equal((await put({ executiveIds: [ZERO] })).status, 400);
+    assert.equal((await put({ executiveIds: [off.id] })).status, 409);
+    const adminId = (await (await import('../src/database/pool')).pool.query("SELECT id FROM users WHERE role='ADMIN' LIMIT 1")).rows[0].id;
+    assert.equal((await put({ executiveIds: [adminId] })).status, 400);
+    assert.equal((await put({ executiveIds: ['x'] })).status, 400);
+    assert.equal((await put({ executiveIds: 'x' })).status, 400);
+    assert.equal((await put({ executiveIds: [], team: 'x' })).status, 400);
+    assert.equal((await put({ executiveIds: [amit.id] }, ZERO)).status, 404);
+  });
+  it('setting executives assigns the waiting PENDING_ASSIGNMENT leads round-robin, oldest first', async () => {
+    const r = await put({ executiveIds: [amit.id, rahul.id, amit.id] }); // duplicate id is ignored
     assert.equal(r.status, 200);
-    assert.equal(r.body.primaryExecutive.id, amit.id);
+    assert.deepEqual(r.body.executives.map((e: any) => e.id), [amit.id, rahul.id]);
+    assert.equal(r.body.assignedPendingLeads, 10);
+    assert.equal(r.body.needsAssignment, false);
+    assert.equal(r.body.pendingLeadCount, 0);
+    const leads = (await t.call(`/admin/leads?propertyId=${p.id}&limit=200`)).body;
+    assert.ok(leads.every((l: any) => l.status === 'INCOMING' && l.assignedExecutive));
+    assert.equal(leads.filter((l: any) => l.assignedExecutive.id === amit.id).length, 5);
+    const oldest = [...leads].reverse();
+    assert.equal(oldest[0].assignedExecutive.id, amit.id);
+    assert.equal(oldest[1].assignedExecutive.id, rahul.id);
   });
-  it('reject executive from another team / inactive / unknown / property unknown', async () => {
-    const wrong = await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: bob.id });
-    assert.equal(wrong.status, 409);
-    const idle = (await t.call('/admin/executives?search=idle')).body[0];
-    assert.equal((await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: idle.id })).status, 409);
-    assert.equal((await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: ZERO })).status, 400);
-    assert.equal((await t.call(`/admin/properties/${ZERO}/executive`, 'PATCH', { executiveId: amit.id })).status, 404);
-    assert.equal((await t.call(`/admin/properties/${p.id}`)).body.primaryExecutive.id, amit.id, 'unchanged');
-  });
-  it('team change with a mismatching primary is refused with guidance; nobody is moved', async () => {
-    const r = await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamB.id });
-    assert.equal(r.status, 409);
-    assert.equal(r.body.errors.code, 'PRIMARY_EXECUTIVE_TEAM_MISMATCH');
-    assert.equal(r.body.errors.resolution.length, 2);
-    const after = await t.call(`/admin/properties/${p.id}`);
-    assert.equal(after.body.team.id, teamA.id);
-    assert.equal(after.body.primaryExecutive.id, amit.id);
-    assert.equal((await t.call(`/admin/executives/${amit.id}`)).body.team.id, teamA.id);
-  });
-  it('team change resolved in the same request: new primary from the new team', async () => {
-    // a primary from the OLD team is still invalid
-    assert.equal((await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamB.id, primaryExecutiveId: rahul.id })).status, 409);
-    const r = await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamB.id, primaryExecutiveId: bob.id });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.team.id, teamB.id);
-    assert.equal(r.body.primaryExecutive.id, bob.id);
-  });
-  it('team change resolved by removing the primary (null)', async () => {
-    const r = await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamA.id, primaryExecutiveId: null });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.team.id, teamA.id);
-    assert.equal(r.body.primaryExecutive, null);
-  });
-  it('team change with no primary needs no resolution', async () => {
-    assert.equal((await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamB.id })).status, 200);
-    await t.call(`/admin/properties/${p.id}/team`, 'PATCH', { teamId: teamA.id });
-  });
-  it('remove primary executive', async () => {
-    await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: amit.id });
-    const r = await t.call(`/admin/properties/${p.id}/executive`, 'DELETE');
-    assert.equal(r.status, 200);
-    assert.equal(r.body.primaryExecutive, null);
-    assert.equal(r.body.team.id, teamA.id, 'team kept');
-  });
-  it('executive who is a primary cannot be moved out of the property team (API + DB)', async () => {
-    await t.call(`/admin/properties/${p.id}/executive`, 'PATCH', { executiveId: amit.id });
-    const r = await t.call(`/admin/executives/${amit.id}/team`, 'PATCH', { teamId: teamB.id });
-    assert.equal(r.status, 409);
-    assert.match(r.body.message, /primary executive of \d+ propert/);
-    assert.equal((await t.call(`/admin/executives/${amit.id}/team`, 'DELETE')).status, 409);
-    assert.equal((await t.call(`/admin/executives/${amit.id}`, 'PATCH', { teamId: teamB.id })).status, 409);
-    await assert.rejects(pool.query('UPDATE users SET team_id=$1 WHERE id=$2', [teamB.id, amit.id]), /properties_primary_in_team_fkey/);
-    await assert.rejects(pool.query('UPDATE properties SET primary_executive_id=$1 WHERE id=$2', [bob.id, p.id]), /properties_primary_in_team_fkey/);
-    // deactivating/soft-deleting is fine: the property just falls back to round robin
-    assert.equal((await t.setActive(amit.id, false)).status, 200);
-    await t.setActive(amit.id, true);
-    await pool.query('UPDATE properties SET primary_executive_id = NULL WHERE primary_executive_id = $1', [amit.id]);
-    assert.equal((await t.call(`/admin/executives/${amit.id}/team`, 'PATCH', { teamId: teamB.id })).status, 200);
-    await t.call(`/admin/executives/${amit.id}/team`, 'PATCH', { teamId: teamA.id });
+  it('replace semantics: the list is exactly what was sent; [] un-assigns', async () => {
+    assert.deepEqual((await put({ executiveIds: [rahul.id] })).body.executives.map((e: any) => e.id), [rahul.id]);
+    const cleared = await put({ executiveIds: [] });
+    assert.equal(cleared.body.needsAssignment, true);
+    assert.equal(cleared.body.assignedPendingLeads, 0);
   });
 });

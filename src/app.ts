@@ -7,6 +7,7 @@ import { env } from './config/env';
 import { pool } from './database/pool';
 import { adminRouter } from './modules/admin/admin.routes';
 import { portalRouter } from './modules/executive-portal/portal.routes';
+import { managerPortalRouter } from './modules/manager-portal/portal.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { createLoginLimiter } from './middleware/rateLimit';
 
@@ -31,7 +32,7 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
   app.use(helmet());
   // No origins configured => no CORS headers at all (same-origin only).
   if (env.corsOrigins.length > 0) {
-    app.use(cors({ origin: env.corsOrigins, methods: ['GET', 'POST', 'PATCH', 'DELETE'], allowedHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }));
+    app.use(cors({ origin: env.corsOrigins, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }));
   }
   app.use(express.json({ limit: '100kb' }));
 
@@ -48,6 +49,7 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
   api.use('/auth', createAuthRouter(createLoginLimiter(options.loginRateLimitMax)));
   api.use('/admin', adminRouter);
   api.use('/executive', portalRouter);
+  api.use('/manager', managerPortalRouter);
   mount?.(api);
   app.use('/api/v1', api);
 

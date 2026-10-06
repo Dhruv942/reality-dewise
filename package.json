@@ -13,6 +13,7 @@
     "migrate:up": "npm run migrate -- up",
     "migrate:down": "npm run migrate -- down",
     "seed": "tsx --env-file-if-exists=.env seed/seed-users.ts",
+    "migrate:test": "node --env-file=.env.test node_modules/node-pg-migrate/bin/node-pg-migrate.js -m migrations --migration-file-language sql up",
     "test": "node --env-file=.env.test --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "seed:prod": "node --env-file-if-exists=.env dist/seed/seed-users.js"
   },

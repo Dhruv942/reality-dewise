@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SALES_DESIGNATIONS } from '../users/user.model';
 
 const name = z.string({ error: 'Name is required' }).trim().min(1, 'Name is required').max(100);
 const email = z
@@ -18,6 +19,8 @@ const password = z
   .min(8, 'Password must be at least 8 characters')
   .max(200, 'Password is too long');
 const teamId = z.uuid('Invalid team id');
+// Sales Executive and Executive Manager: same role and permissions, different designation.
+const designation = z.enum(SALES_DESIGNATIONS, { error: `Designation must be one of: ${SALES_DESIGNATIONS.join(', ')}` });
 
 export const idParam = z.object({ id: z.uuid('Invalid id') });
 export const executiveIdParam = z.object({ executiveId: z.uuid('Invalid executive id') });
@@ -28,8 +31,15 @@ export const createExecutiveSchema = z.strictObject({
   phone: phone.nullish(),
   username,
   password,
+  designation: designation.optional(),
   teamId: teamId.nullish(),
 });
+
+// Managers: same account fields, no team membership and no designation (always MANAGER).
+export const createManagerSchema = z.strictObject({ name, email, phone: phone.nullish(), username, password });
+export const updateManagerSchema = z
+  .strictObject({ name: name.optional(), email: email.optional(), phone: phone.nullable().optional(), username: username.optional() })
+  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });
 
 // strictObject: role, password, isActive etc. are rejected here (they have dedicated rules/endpoints).
 export const updateExecutiveSchema = z
@@ -38,6 +48,7 @@ export const updateExecutiveSchema = z
     email: email.optional(),
     phone: phone.nullable().optional(),
     username: username.optional(),
+    designation: designation.optional(),
     teamId: teamId.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'At least one field is required' });

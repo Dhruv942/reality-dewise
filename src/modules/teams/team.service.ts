@@ -16,7 +16,7 @@ const teamMembers = async (teamId: string) =>
     return rest;
   });
 
-export const listTeams = async (f: { isActive?: boolean; search?: string }) => (await teams.list(f)).map(toTeamDto);
+export const listTeams = async (f: { isActive?: boolean; search?: string; managerId?: string }) => (await teams.list(f)).map(toTeamDto);
 
 export async function getTeamDetails(id: string) {
   const team = await getTeam(id);
@@ -28,21 +28,35 @@ export async function getTeamExecutives(id: string) {
   return { team: { id: team.id, name: team.name }, executives: await teamMembers(id) };
 }
 
-export async function createTeam(input: { name: string; description?: string | null }) {
-  const id = await teams.create(input.name, input.description ?? null);
+/** The team's manager must be an active, live MANAGER account. */
+async function assertValidManager(managerId: string): Promise<void> {
+  const m = await executives.findById(managerId);
+  if (!m || m.deleted_at) throw new AppError(400, 'Manager not found');
+  if (m.role !== 'MANAGER') throw new AppError(400, 'User is not a manager');
+  if (!m.is_active) throw new AppError(409, 'Manager is inactive');
+}
+
+export async function createTeam(input: { name: string; description?: string | null; managerId?: string | null }) {
+  if (input.managerId) await assertValidManager(input.managerId);
+  const id = await teams.create(input.name, input.description ?? null, input.managerId ?? null);
   return toTeamDto(await getTeam(id));
 }
 
-export async function updateTeam(id: string, input: { name?: string; description?: string | null }) {
+export async function updateTeam(
+  id: string,
+  input: { name?: string; description?: string | null; managerId?: string | null },
+) {
   await getTeam(id);
-  await teams.update(id, input);
+  if (input.managerId) await assertValidManager(input.managerId);
+  const { managerId, ...rest } = input;
+  await teams.update(id, { ...rest, manager_id: managerId });
   return toTeamDto(await getTeam(id));
 }
 
 /**
  * Deactivating keeps every executive's team_id untouched: membership/history is preserved and
- * reactivating the team restores it. The team simply stops being a valid target for new
- * assignments, and future round-robin must filter on `teams.is_active AND users.is_active`.
+ * reactivating the team restores it. The team simply stops being a valid target for new executives.
+ * (Lead round-robin does not use teams: it rotates over the executives picked per property.)
  */
 export async function setTeamStatus(id: string, isActive: boolean) {
   await getTeam(id);

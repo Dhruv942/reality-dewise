@@ -8,10 +8,10 @@ export const listCustomers = async (f: { search?: string; limit: number; offset:
   (await repo.list(f)).map(toCustomerDto);
 
 /** Customer plus every enquiry they made, each showing the property they asked about. */
-export async function getCustomerDetails(id: string) {
+export async function getCustomerDetails(id: string, viewerId?: string) {
   const customer = await repo.findById(id);
   if (!customer) throw new NotFoundError('Customer not found');
-  const leads = await leadRepo.list({ customerId: id, limit: 200, offset: 0 });
+  const leads = await leadRepo.list({ customerId: id, limit: 200, offset: 0, viewerId });
   return { ...toCustomerDto(customer), leads: leads.map(toLeadDto).map(({ customer: _c, ...rest }) => rest) };
 }
 

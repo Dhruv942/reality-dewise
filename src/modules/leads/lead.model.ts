@@ -1,13 +1,23 @@
-import type { AssignmentReason, AssignmentType } from '../assignment/assignment.model';
+import type { CustomerType } from '../customers/customer.model';
 import type { PropertySource } from '../properties/property.model';
 
-export const LEAD_STATUSES = ['NEW', 'CONTACTED', 'SITE_VISIT', 'NEGOTIATION', 'WON', 'LOST'] as const;
+export const LEAD_STATUSES = ['PENDING_ASSIGNMENT', 'INCOMING', 'RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'BROKER'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
+/** Statuses a person may set. PENDING_ASSIGNMENT is system-managed: it ends when an executive is assigned. */
+export const PIPELINE_STATUSES = LEAD_STATUSES.filter((s) => s !== 'PENDING_ASSIGNMENT') as Exclude<LeadStatus, 'PENDING_ASSIGNMENT'>[];
 
 export interface LeadRow {
   id: string;
   status: LeadStatus;
   message: string | null;
+  is_important: boolean; // the viewing user's own flag
+  lead_no: string; // bigint comes back from pg as a string
+  requirement: string | null;
+  assigned_at: Date | null;
+  seen_at: Date | null;
+  customer_type: CustomerType;
+  budget: string | null; // numeric comes back from pg as a string
+  requested_property_name: string | null;
   external_lead_id: string | null;
   source: PropertySource;
   created_at: Date;
@@ -18,30 +28,34 @@ export interface LeadRow {
   customer_email: string | null;
   property_id: string;
   property_name: string;
-  external_property_id: string;
   property_location: string | null;
   executive_id: string | null;
   executive_name: string | null;
-  assignment_type: AssignmentType | null;
-  assignment_reason: AssignmentReason | null;
 }
 
 export const toLeadDto = (l: LeadRow) => ({
   id: l.id,
+  leadNo: Number(l.lead_no),
+  // Per user: true only if the logged-in user marked this lead important. Never reflects anyone else's flag.
+  isImportant: l.is_important,
   status: l.status,
   message: l.message,
+  requirement: l.requirement,
+  budget: l.budget === null ? null : Number(l.budget),
+  requestedPropertyName: l.requested_property_name,
   externalLeadId: l.external_lead_id,
   source: l.source,
-  customer: { id: l.customer_id, name: l.customer_name, mobile: l.customer_mobile, email: l.customer_email },
+  customer: { id: l.customer_id, name: l.customer_name, mobile: l.customer_mobile, email: l.customer_email, type: l.customer_type },
   // The property the customer is asking about.
   property: {
     id: l.property_id,
     name: l.property_name,
-    externalPropertyId: l.external_property_id,
     location: l.property_location,
   },
   assignedExecutive: l.executive_id ? { id: l.executive_id, name: l.executive_name } : null,
-  assignment: l.assignment_type ? { type: l.assignment_type, reason: l.assignment_reason } : null,
+  // For the assigned executive: true until they first open the lead (the "New / Assigned to you" badge).
+  isNew: l.executive_id !== null && l.seen_at === null,
+  assignedAt: l.assigned_at,
   createdAt: l.created_at,
   updatedAt: l.updated_at,
 });

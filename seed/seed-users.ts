@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { pool } from '../src/database/pool';
 import { hashPassword } from '../src/utils/password';
 import { upsertByEmail } from '../src/modules/users/user.repository';
-import type { UserRole } from '../src/modules/users/user.model';
+import type { UserDesignation, UserRole } from '../src/modules/users/user.model';
 
 // No built-in default passwords: they must come from the environment.
 const seedEnv = z.object({
@@ -23,13 +23,13 @@ async function main(): Promise<void> {
   }
   const s = parsed.data;
 
-  const seeds: { name: string; email: string; username: string; password: string; role: UserRole }[] = [
+  const seeds: { name: string; email: string; username: string; password: string; role: UserRole; designation?: UserDesignation }[] = [
     { name: s.SEED_ADMIN_NAME, email: s.SEED_ADMIN_EMAIL, username: s.SEED_ADMIN_USERNAME, password: s.SEED_ADMIN_PASSWORD, role: 'ADMIN' },
-    { name: s.SEED_EXECUTIVE_NAME, email: s.SEED_EXECUTIVE_EMAIL, username: s.SEED_EXECUTIVE_USERNAME, password: s.SEED_EXECUTIVE_PASSWORD, role: 'EXECUTIVE' },
+    { name: s.SEED_EXECUTIVE_NAME, email: s.SEED_EXECUTIVE_EMAIL, username: s.SEED_EXECUTIVE_USERNAME, password: s.SEED_EXECUTIVE_PASSWORD, role: 'SALES', designation: 'SALES_EXECUTIVE' },
   ];
 
   for (const u of seeds) {
-    const user = await upsertByEmail({ name: u.name, email: u.email, username: u.username, passwordHash: await hashPassword(u.password), role: u.role });
+    const user = await upsertByEmail({ name: u.name, email: u.email, username: u.username, passwordHash: await hashPassword(u.password), role: u.role, designation: u.designation });
     console.log(`Seeded ${user.role}: ${user.email}`);
   }
 }

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { validateBody } from '../../middleware/validate';
-import * as c from './executive.controller';
+import { executiveController as c } from './executive.controller';
 import {
   assignTeamSchema,
   createExecutiveSchema,

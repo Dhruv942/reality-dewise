@@ -39,43 +39,75 @@ tokenInput.value = sessionStorage.getItem('token') || '';
 tokenInput.onchange = () => sessionStorage.setItem('token', tokenInput.value.trim());
 
 const T = 'text', B = 'bool';
-const STATUSES = ['NEW', 'CONTACTED', 'SITE_VISIT', 'NEGOTIATION', 'WON', 'LOST'];
-// field: [name, kind, extra]. kind: text | bool | ['opt1','opt2'] (select). extra 'path' = goes in the URL, 'id' = suggests known ids
+const STATUSES = ['INCOMING', 'RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'BROKER'];
+const SOURCES = ['99ACRES', 'MAGICBRICKS'];
+const DESIGNATIONS = ['SALES_EXECUTIVE', 'EXECUTIVE_MANAGER'];
+// field: [name, kind, extra]. kind: text | bool | ['opt1','opt2'] (select). extra: 'path' = goes in the URL, 'id' = suggests known ids,
+// 'number' = sent as a number, 'list' = comma-separated values sent as an array
 const F = (name, kind = T, extra = '') => ({ name, kind, extra });
 
 const sections = [
   ['1. Login', [
-    ['Admin login', 'POST', '/auth/admin/login', [F('email'), F('password')], 'login'],
-    ['Executive login', 'POST', '/auth/executive/login', [F('email'), F('password')], 'login'],
+    ['Admin login (email or username)', 'POST', '/auth/admin/login', [F('email'), F('username'), F('password')], 'login'],
+    ['Manager login (email or username)', 'POST', '/auth/manager/login', [F('email'), F('username'), F('password')], 'login'],
+    ['Sales executive / executive manager login (email or username)', 'POST', '/auth/executive/login', [F('email'), F('username'), F('password')], 'login'],
     ['Who am I', 'GET', '/auth/me', []],
   ]],
-  ['2. Teams & executives (admin)', [
-    ['Create team', 'POST', '/admin/teams', [F('name'), F('description')]],
+  ['2. Managers, teams & executives (admin)', [
+    ['Create manager', 'POST', '/admin/managers', [F('name'), F('email'), F('phone'), F('username'), F('password')]],
+    ['List managers', 'GET', '/admin/managers', []],
+    ['Manager details (+ teams they lead)', 'GET', '/admin/managers/{id}', [F('id', T, 'path id')]],
+    ['Activate / deactivate manager', 'PATCH', '/admin/managers/{id}/status', [F('id', T, 'path id'), F('isActive', B)]],
+    ['Create team (managerId = who leads it)', 'POST', '/admin/teams', [F('name'), F('description'), F('managerId', T, 'id')]],
+    ['Set / clear team manager', 'PATCH', '/admin/teams/{id}', [F('id', T, 'path id'), F('managerId', T, 'id')]],
     ['List teams', 'GET', '/admin/teams', []],
-    ['Create executive', 'POST', '/admin/executives', [F('name'), F('email'), F('phone'), F('username'), F('password'), F('teamId', T, 'id')]],
+    ['Create sales executive / executive manager', 'POST', '/admin/executives', [F('name'), F('email'), F('phone'), F('username'), F('password'), F('designation', DESIGNATIONS), F('teamId', T, 'id')]],
+    ['Change designation', 'PATCH', '/admin/executives/{id}', [F('id', T, 'path id'), F('designation', DESIGNATIONS)]],
     ['List executives', 'GET', '/admin/executives', []],
     ['Activate / deactivate executive', 'PATCH', '/admin/executives/{id}/status', [F('id', T, 'path id'), F('isActive', B)]],
     ['Put executive in team', 'PATCH', '/admin/executives/{id}/team', [F('id', T, 'path id'), F('teamId', T, 'id')]],
     ['Team members', 'GET', '/admin/teams/{id}/executives', [F('id', T, 'path id')]],
   ]],
-  ['3. Property (admin)', [
-    ['Create property', 'POST', '/admin/properties', [F('name'), F('externalPropertyId'), F('source', ['99ACRES', 'MAGICBRICKS']), F('description'), F('location'), F('teamId', T, 'id'), F('primaryExecutiveId', T, 'id')]],
-    ['List properties', 'GET', '/admin/properties', []],
-    ['Set property team', 'PATCH', '/admin/properties/{id}/team', [F('id', T, 'path id'), F('teamId', T, 'id')]],
-    ['Set primary executive', 'PATCH', '/admin/properties/{id}/executive', [F('id', T, 'path id'), F('executiveId', T, 'id')]],
-    ['Remove primary executive', 'DELETE', '/admin/properties/{id}/executive', [F('id', T, 'path id')]],
-    ['Activate / deactivate property', 'PATCH', '/admin/properties/{id}/status', [F('id', T, 'path id'), F('isActive', B)]],
+  ['3. Properties (admin). Created automatically by leads; pick their executives here', [
+    ['List properties (assigned=false => need executives)', 'GET', '/admin/properties', []],
     ['Property details', 'GET', '/admin/properties/{id}', [F('id', T, 'path id')]],
+    ['Set property executives (replaces list; comma-separated ids)', 'PUT', '/admin/properties/{id}/executives', [F('id', T, 'path id'), F('executiveIds', T, 'list')]],
+    ['Edit property', 'PATCH', '/admin/properties/{id}', [F('id', T, 'path id'), F('name'), F('description'), F('location')]],
+    ['Activate / deactivate property', 'PATCH', '/admin/properties/{id}/status', [F('id', T, 'path id'), F('isActive', B)]],
     ['Assignment history', 'GET', '/admin/properties/{id}/assignment-history', [F('id', T, 'path id')]],
   ]],
   ['4. Enquiry / leads (admin)', [
-    ['Send enquiry (creates customer + lead + assigns)', 'POST', '/admin/leads', [F('name'), F('mobile'), F('email'), F('propertyId', T, 'id'), F('message')]],
-    ['List all leads', 'GET', '/admin/leads', []],
-    ['List customers', 'GET', '/admin/customers', []],
+    ['Send enquiry (client + property + lead + round-robin)', 'POST', '/admin/leads', [F('name'), F('mobile'), F('email'), F('propertyName'), F('source', SOURCES), F('requirement'), F('budget', T, 'number'), F('message')]],
+    ['List all leads (?status=PENDING_ASSIGNMENT for unassigned)', 'GET', '/admin/leads', []],
+    ['Lead details + client history', 'GET', '/admin/leads/{id}', [F('id', T, 'path id')]],
+    ['Update lead status', 'PATCH', '/admin/leads/{id}/status', [F('id', T, 'path id'), F('status', STATUSES)]],
+    ['Assign / reassign lead to a sales executive', 'PATCH', '/admin/leads/{id}/assign', [F('id', T, 'path id'), F('executiveId', T, 'id')]],
+    ['Mark lead important (for me)', 'POST', '/admin/leads/{id}/important', [F('id', T, 'path id')]],
+    ['Unmark lead important (for me)', 'DELETE', '/admin/leads/{id}/important', [F('id', T, 'path id')]],
+    ['List clients', 'GET', '/admin/customers', []],
   ]],
-  ['5. Executive view (login as executive first)', [
-    ['My leads', 'GET', '/executive/leads', []],
+  ['5. Manager view (login as manager first)', [
+    ['My teams', 'GET', '/manager/teams', []],
+    ['Executives in my teams', 'GET', '/manager/executives', []],
+    ['Leads of my teams + unassigned (?status=PENDING_ASSIGNMENT)', 'GET', '/manager/leads', []],
+    ['Lead details + client history', 'GET', '/manager/leads/{id}', [F('id', T, 'path id')]],
+    ['Assign / reassign to an executive of my teams', 'PATCH', '/manager/leads/{id}/assign', [F('id', T, 'path id'), F('executiveId', T, 'id')]],
+    ['Mark lead important (for me)', 'POST', '/manager/leads/{id}/important', [F('id', T, 'path id')]],
+    ['Unmark lead important (for me)', 'DELETE', '/manager/leads/{id}/important', [F('id', T, 'path id')]],
+  ]],
+  ['Settings (admin): lead assignment rule', [
+    ['Get assignment rule', 'GET', '/admin/settings/assignment-rule', []],
+    ['Set assignment rule', 'PUT', '/admin/settings/assignment-rule', [F('rule', ['ROUND_ROBIN'])]],
+    ['Get lead timeout (minutes)', 'GET', '/admin/settings/lead-timeout', []],
+    ['Set lead timeout (minutes)', 'PUT', '/admin/settings/lead-timeout', [F('minutes', T, 'number')]],
+  ]],
+  ['6. Executive view (login as sales executive / executive manager first)', [
+    ['My dashboard counts', 'GET', '/executive/leads/summary', []],
+    ['My leads (new ones first)', 'GET', '/executive/leads', []],
+    ['Open a lead (+ client history, clears "New")', 'GET', '/executive/leads/{id}', [F('id', T, 'path id')]],
     ['Update my lead status', 'PATCH', '/executive/leads/{id}/status', [F('id', T, 'path id'), F('status', STATUSES)]],
+    ['Mark lead important (for me)', 'POST', '/executive/leads/{id}/important', [F('id', T, 'path id')]],
+    ['Unmark lead important (for me)', 'DELETE', '/executive/leads/{id}/important', [F('id', T, 'path id')]],
   ]],
 ];
 
@@ -106,7 +138,9 @@ async function run(method, pathTpl, fields, kind, values) {
   for (const f of fields) {
     const v = values[f.name];
     if (f.extra.includes('path')) path = path.replace(`{${f.name}}`, encodeURIComponent(v));
-    else if (v !== '' && v !== undefined) body[f.name] = f.kind === B ? v === 'true' : v;
+    else if (v !== '' && v !== undefined) {
+      body[f.name] = f.kind === B ? v === 'true' : f.extra.includes('number') ? Number(v) : f.extra.includes('list') ? v.split(',').map((x) => x.trim()).filter(Boolean) : v;
+    }
   }
   const headers = {};
   const hasBody = method !== 'GET' && method !== 'DELETE' && fields.length > pathVars.length;
