@@ -34,7 +34,8 @@ createdb realestate_crm
 cp .env.example .env
 #   set DATABASE_URL (e.g. postgres://you@localhost:5432/realestate_crm)
 #   set JWT_SECRET   (openssl rand -hex 48)
-#   set SEED_ADMIN_PASSWORD and SEED_EXECUTIVE_PASSWORD (min 8 chars)
+#   set SEED_ADMIN_PASSWORD and SEED_EXECUTIVE_PASSWORD (min 8 chars); optionally SEED_MANAGER_PASSWORD,
+#   SEED_EXECUTIVE_2_PASSWORD and SEED_EXECUTIVE_3_PASSWORD to also create a manager and two more executives
 
 # 4. create the tables
 npm run migrate:up
@@ -61,7 +62,7 @@ Check it works: `curl http://localhost:4000/health` → `{"status":"ok","db":"up
 | `npm run migrate:up` | Apply pending migrations to the `.env` database |
 | `npm run migrate:down` | Revert the last migration (see warning below) |
 | `npm run migrate:test` | Apply migrations to the **test** database (`.env.test`) |
-| `npm run seed` / `npm run seed:prod` | Create/update the admin and a sample executive (`seed:prod` runs the compiled `dist` version) |
+| `npm run seed` / `npm run seed:prod` | Create/update the admin, an optional manager and up to 3 executives, with the manager leading a team of the executives. Re-running resets those accounts' passwords and reactivates them, so use different `SEED_*_EMAIL` values to add accounts without touching existing ones (`seed:prod` runs the compiled `dist` version) |
 | `npm test` | Run the whole test suite against the test database |
 
 > Migrations `007`, `009` and `010` rewrite or drop columns/types and cannot be fully reversed. Back up before running migrations on a database you care about.
@@ -83,7 +84,7 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 | `LEAD_TIMEOUT_JOB_ENABLED` | no | `true` | Runs the lead timeout sweep inside the API process (`false` to run it elsewhere) |
 | `LEAD_TIMEOUT_CHECK_INTERVAL_SECONDS` | no | `60` | How often the sweep looks for timed-out leads (min 5). The SLA duration itself is an admin setting (default 90 minutes, runs 24/7) |
 | `LOGIN_RATE_LIMIT_MAX` / `LOGIN_RATE_LIMIT_WINDOW_MINUTES` | no | `10` / `15` | Failed-login limiter |
-| `SEED_*` | for `seed` | | Admin and sample executive email, username, name, password. **No default passwords exist** |
+| `SEED_*` | for `seed` | | Email, username, name and password for the admin, the manager (`SEED_MANAGER_*`), executive 1 (`SEED_EXECUTIVE_*`) and executives 2-3 (`SEED_EXECUTIVE_2_*`, `SEED_EXECUTIVE_3_*`), plus `SEED_TEAM_NAME`. **No default passwords exist**; an empty optional password skips that account |
 
 `.env` and `.env.test` are git-ignored. Never commit them.
 
@@ -116,7 +117,7 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 │       ├── manager-portal/       # /api/v1/manager: a manager's teams, executives and leads, lead assignment (MANAGER only)
 │       └── executive-portal/     # /api/v1/executive: a sales user's own leads (SALES only)
 ├── migrations/                   # numbered SQL migrations (001 … 014)
-├── seed/seed-users.ts            # creates the first admin / sample executive
+├── seed/seed-users.ts            # creates the first admin, an optional manager and up to 3 executives (plus their team)
 ├── tests/                        # integration tests (real HTTP + real Postgres)
 ├── public/test-console.html      # dev-only manual API tester
 ├── docs/                         # ARCHITECTURE.md (design) · FRONTEND_ROUND_ROBIN_GUIDE.md (frontend guide for round robin assignment)
