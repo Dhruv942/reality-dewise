@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { validateBody } from '../../middleware/validate';
 import * as c from './lead.controller';
-import { assignLeadSchema, createLeadSchema, statusSchema } from './lead.validation';
+import { assignLeadSchema, createLeadSchema, managerCreateLeadSchema, statusSchema } from './lead.validation';
 
 export const adminLeadRouter = Router();
 adminLeadRouter.get('/', c.adminList);
@@ -15,6 +15,7 @@ adminLeadRouter.delete('/:id/important', c.unmarkImportant);
 /** A manager works with their teams' leads and unassigned ones, and assigns them to executives of their teams. */
 export const managerLeadRouter = Router();
 managerLeadRouter.get('/', c.managerList);
+managerLeadRouter.post('/', validateBody(managerCreateLeadSchema), c.managerCreate);
 managerLeadRouter.get('/:id', c.managerGet);
 managerLeadRouter.patch('/:id/assign', validateBody(assignLeadSchema), c.assign);
 managerLeadRouter.post('/:id/important', c.markImportant);

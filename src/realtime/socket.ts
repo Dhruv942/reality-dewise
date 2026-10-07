@@ -104,12 +104,20 @@ const clientsIn = (server: Server, to: string[]): number => {
  * The one place events leave the server, so every emit is logged the same way: event, what it is about
  * (ids only, never customer details or tokens), the rooms, and how many connected clients actually got it.
  */
-export function emitTo(event: string, to: string[], payload: unknown, about = ''): void {
+export function emitTo(event: string, to: string[], payload: unknown, about = '', except: string[] = []): void {
   const server = io;
   const targets = [...new Set(to)];
   if (!server || targets.length === 0) return;
-  server.to(targets).emit(event, payload);
-  console.log(`Socket emit: ${event}${about ? ` ${about}` : ''} -> [${targets.join(', ')}] (${clientsIn(server, targets)} client(s))`);
+  server.to(targets).except(except).emit(event, payload);
+  const skipped = except.length ? ` except [${except.join(', ')}]` : '';
+  console.log(`Socket emit: ${event}${about ? ` ${about}` : ''} -> [${targets.join(', ')}]${skipped} (${clientsIn(server, targets)} client(s))`);
+}
+
+/** Ends every live connection of a user (deactivated, deleted, password changed): they must log in again. */
+export function disconnectUser(userId: string): void {
+  if (!io) return;
+  io.in(rooms.user(userId)).disconnectSockets(true);
+  console.log(`Socket disconnect forced: user ${userId} (account changed)`);
 }
 
 /** Closes every connection and the HTTP server underneath. */

@@ -83,6 +83,8 @@ The `lead` object in payloads has the same shape as the lead in the REST list/de
 - **Order matters on SLA expiry**: `lead:sla-expired` then `lead:reassigned`. Use expired to show "you lost this lead", reassigned to update lists.
 - **`lead:sla-warning.remainingSeconds`** is for display only. Do not drive the SLA from a browser timer: the backend owns the SLA and reassigns even with the browser closed. If you show a countdown, start it from `expiresAt` and let the server events be the truth.
 - A new lead for an executive arrives as `lead:created` **and** `lead:assigned`. Key your list by `leadId` and upsert, so receiving both is harmless.
+- **A manager can get a slim `lead:assigned`**: `{ leadId, executiveId, previousExecutiveId: null, reason }` with **no `lead`**. It means a pending lead you could see was assigned to an executive outside your teams, so **remove it from your pending list**. If `lead` is present, upsert as usual.
+- **Forced disconnect**: if an admin deactivates or deletes the account, or changes its password, the server closes that user's sockets. The reconnect then fails auth (`Invalid token` / `Session expired…`): send the user to login.
 - Pending leads (no executive) are sent to admins and managers only. Executives never hear about them until they are assigned.
 - Events are not replayed. After a reconnect, refetch (section 5).
 
@@ -93,7 +95,7 @@ const upsert = (lead) => leadStore.upsert(lead);
 const remove = (leadId: string) => leadStore.remove(leadId);
 
 socket.on('lead:created',  ({ lead }) => upsert(lead));
-socket.on('lead:assigned', ({ lead }) => upsert(lead));
+socket.on('lead:assigned', (p) => (p.lead ? upsert(p.lead) : remove(p.leadId))); // no lead = manager outside scope
 socket.on('lead:reassigned', (p) => {
   if (!p.lead || p.previousExecutiveId === me.id) remove(p.leadId);   // I lost it
   else upsert(p.lead);

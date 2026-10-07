@@ -21,6 +21,14 @@ export const adminCreate = async (req: Request, res: Response) => {
   const { created, lead, notice } = await service.createLead(req.body, self(req));
   res.status(created ? 201 : 200).json(notice ? { ...lead, notice } : lead);
 };
+// ---- manager: add a lead and give it to an executive of their teams in one step ----
+export const managerCreate = async (req: Request, res: Response) => {
+  const { executiveId, ...input } = req.body;
+  const managerId = self(req);
+  await service.assertAssignable(executiveId, managerId); // before anything is saved
+  const { created, lead, notice } = await service.createLead({ ...input, assignTo: { executiveId, byId: managerId } }, managerId);
+  res.status(created ? 201 : 200).json(notice ? { ...lead, notice } : lead);
+};
 export const adminSetStatus = async (req: Request, res: Response) => {
   res.json(await service.updateStatus(id(req), req.body.status, undefined, self(req)));
 };

@@ -92,6 +92,19 @@ describe('socket authentication (same tokens as the REST API)', () => {
     await t.setActive(x.id, false);
     await assert.rejects(connect(tok), /Invalid token/);
   });
+  it('closes live sockets when the account is deactivated, deleted or its password is changed', async () => {
+    for (const how of ['deactivate', 'delete', 'password'] as const) {
+      const x = await t.exec(`rt.${how}`);
+      const tok = await t.login('executive', `rt.${how}@test.com`, 'TempPass123');
+      const client = await connect(tok);
+      const closed = new Promise((r) => client.sock.once('disconnect', r));
+      if (how === 'deactivate') await t.setActive(x.id, false);
+      if (how === 'delete') await t.call(`/admin/executives/${x.id}`, 'DELETE');
+      if (how === 'password') await t.call(`/admin/executives/${x.id}/password`, 'PATCH', { password: 'NewPass12345' });
+      await Promise.race([closed, new Promise((_, rej) => setTimeout(() => rej(new Error(`${how}: socket still open`)), 2000))]);
+      assert.equal(client.sock.connected, false);
+    }
+  });
   it('a client cannot put itself in another room', async () => {
     const [A, M1] = await Promise.all([connect(tokA), connect(tokM1)]);
     for (const room of ['admin', 'managers', `executive:${b.id}`, `user:${b.id}`]) {
@@ -171,7 +184,13 @@ describe('pending assignment', () => {
     assert.deepEqual(x.B.of('notification:new').map((m) => m.type), ['LEAD_ASSIGNED']);
     for (const who of [x.admin, x.M2]) assert.equal(who.of('lead:assigned').length, 1, 'admin and the executive\'s manager');
     assert.equal(mentions(x.A, l.id).length, 0);
-    assert.equal(mentions(x.M1, l.id).filter((e) => e.name === 'lead:assigned').length, 0, 'the other team\'s manager has no part in it');
+    // The other team's manager saw it as pending: they are told it is gone, without customer data.
+    const slim = x.M1.of('lead:assigned');
+    assert.equal(slim.length, 1);
+    assert.equal(slim[0].lead, undefined);
+    assert.ok(!JSON.stringify(slim[0]).includes(l.customer.mobile));
+    assert.equal(x.M2.of('lead:assigned').length, 1, 'the executive\'s own manager gets it once, with the lead');
+    assert.ok(x.M2.of('lead:assigned')[0].lead);
   });
 });
 

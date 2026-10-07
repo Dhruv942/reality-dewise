@@ -31,9 +31,9 @@ const leadPayload = (row: LeadRow) => {
   return lead;
 };
 
-const emit = (event: string, to: string[], payload: unknown) => {
+const emit = (event: string, to: string[], payload: unknown, except: string[] = []) => {
   const leadId = (payload as { leadId?: string }).leadId;
-  emitTo(event, to, payload, leadId ? `lead=${leadId}` : '');
+  emitTo(event, to, payload, leadId ? `lead=${leadId}` : '', except);
 };
 
 /** Managers leading the team of any of these executives. */
@@ -107,7 +107,11 @@ export const publishAssignment = (
     const payload = { leadId: a.leadId, lead: leadPayload(row), executiveId, previousExecutiveId: previous, reason: a.reason };
 
     emit(event, [rooms.admin, rooms.executive(executiveId), ...managers.map(rooms.manager)], payload);
-    if (previous) emit(event, [rooms.executive(previous)], { leadId: a.leadId, executiveId, previousExecutiveId: previous, reason: a.reason });
+    const slim = { leadId: a.leadId, executiveId, previousExecutiveId: previous, reason: a.reason };
+    if (previous) emit(event, [rooms.executive(previous)], slim);
+    // A lead that was pending was visible to EVERY manager. Those not in charge of its new executive can no longer
+    // see it, so they get a slim event (no customer data) to drop it from their pending list.
+    if (!previous && a.reason !== 'CREATED') emit(event, [rooms.managers], slim, managers.map(rooms.manager));
 
     // The same assignment (same lead, executive and assigned_at) can only notify once, whatever retries.
     const key = `${row.id}:${executiveId}:${row.assigned_at.getTime()}`;

@@ -31,6 +31,9 @@ export const createLeadSchema = z.strictObject({
   externalLeadId: z.string().trim().min(1).max(100).nullish(),
 });
 
+/** A manager adds a lead and must give it to one of the sales users of the teams they lead. */
+export const managerCreateLeadSchema = createLeadSchema.extend({ executiveId: z.uuid('Invalid executive id') });
+
 const filterStatus = z.enum(LEAD_STATUSES, { error: `Status must be one of: ${LEAD_STATUSES.join(', ')}` });
 const setStatus = z.enum(PIPELINE_STATUSES, { error: `Status must be one of: ${PIPELINE_STATUSES.join(', ')}` });
 export const statusSchema = z.strictObject({ status: setStatus });

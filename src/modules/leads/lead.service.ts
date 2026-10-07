@@ -29,6 +29,8 @@ export interface NewLeadInput {
   /** Portal's own enquiry id. When given, submitting the same one again returns the existing lead. */
   externalLeadId?: string | null;
   rawPayload?: unknown;
+  /** Give the lead straight to this executive (already checked with `assertAssignable`) instead of the round-robin. */
+  assignTo?: { executiveId: string; byId: string };
 }
 
 const pendingNotice = (propertyName: string) =>
@@ -72,6 +74,19 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         externalLeadId,
         rawPayload: input.rawPayload,
       });
+      if (input.assignTo) {
+        const row = await propertyRepo.findById(property.id, tx);
+        if (!row?.is_active) throw new AppError(409, 'Property is inactive and cannot receive leads');
+        await repo.markAssigned(tx, id, input.assignTo.executiveId);
+        await assignmentRepo.insertHistory(tx, {
+          propertyId: property.id,
+          executiveId: input.assignTo.executiveId,
+          leadId: id,
+          method: 'MANUAL',
+          assignedById: input.assignTo.byId,
+        });
+        return { leadId: id, notice: undefined };
+      }
       const assignment = await propertyAssignmentService.assignLeadToProperty(property.id, id, tx);
       if (assignment) {
         await repo.markAssigned(tx, id, assignment.executiveId);
@@ -89,6 +104,21 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
       if (winner) return { created: false, lead: toLeadDto(winner) };
     }
     throw err;
+  }
+}
+
+/**
+ * Throws unless `executiveId` is an active sales user the actor may give leads to: any of them for an admin,
+ * only those in the teams they lead for a manager (`managerId`).
+ */
+export async function assertAssignable(executiveId: string, managerId?: string): Promise<void> {
+  const target = await executiveRepo.findById(executiveId);
+  if (!target || target.deleted_at) throw new AppError(400, 'Executive not found');
+  if (target.role !== 'SALES') throw new AppError(400, 'Leads can only be assigned to sales executives or executive managers');
+  if (!target.is_active) throw new AppError(409, 'Executive is inactive');
+  if (managerId) {
+    const { rowCount } = await pool.query('SELECT 1 FROM teams WHERE id = $1 AND manager_id = $2', [target.team_id, managerId]);
+    if (!rowCount) throw new ForbiddenError('You can only assign leads to executives in the teams you manage');
   }
 }
 
@@ -173,14 +203,7 @@ export async function assignLead(id: string, executiveId: string, actor: { id: s
   const lead = await repo.findById(id, undefined, managerId);
   if (!lead) throw new NotFoundError('Lead not found');
 
-  const target = await executiveRepo.findById(executiveId);
-  if (!target || target.deleted_at) throw new AppError(400, 'Executive not found');
-  if (target.role !== 'SALES') throw new AppError(400, 'Leads can only be assigned to sales executives or executive managers');
-  if (!target.is_active) throw new AppError(409, 'Executive is inactive');
-  if (managerId) {
-    const { rowCount } = await pool.query('SELECT 1 FROM teams WHERE id = $1 AND manager_id = $2', [target.team_id, managerId]);
-    if (!rowCount) throw new ForbiddenError('You can only assign leads to executives in the teams you manage');
-  }
+  await assertAssignable(executiveId, managerId);
 
   if (lead.executive_id === executiveId) return getLead(id, undefined, actor.id); // already theirs: nothing to do
   await withTransaction(async (tx) => {
