@@ -8,6 +8,7 @@ import { pool } from './database/pool';
 import { adminRouter } from './modules/admin/admin.routes';
 import { portalRouter } from './modules/executive-portal/portal.routes';
 import { managerPortalRouter } from './modules/manager-portal/portal.routes';
+import { notificationRouter } from './modules/notifications/notification.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { createLoginLimiter } from './middleware/rateLimit';
 
@@ -50,6 +51,7 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
   api.use('/admin', adminRouter);
   api.use('/executive', portalRouter);
   api.use('/manager', managerPortalRouter);
+  api.use('/notifications', notificationRouter);
   mount?.(api);
   app.use('/api/v1', api);
 

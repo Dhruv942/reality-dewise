@@ -4,6 +4,7 @@ import { randomInt } from 'node:crypto';
 import { createApp } from '../src/app';
 import { pool } from '../src/database/pool';
 import { hashPassword } from '../src/utils/password';
+import { closeSocketServer, initSocketServer } from '../src/realtime/socket';
 import { upsertByEmail } from '../src/modules/users/user.repository';
 
 export const ZERO = '00000000-0000-0000-0000-000000000000';
@@ -12,6 +13,7 @@ export async function startTestApp() {
   await pool.query('TRUNCATE users, teams, customers, properties CASCADE');
   await upsertByEmail({ name: 'Admin', email: 'admin@test.com', username: 'admin', passwordHash: await hashPassword('Admin-pass-123'), role: 'ADMIN' });
   const server: Server = createApp().listen(0);
+  initSocketServer(server);
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   const raw = async (path: string, method: string, body: unknown, token: string) => {
@@ -55,5 +57,5 @@ export async function startTestApp() {
     (await raw(`/auth/${portal}/login`, 'POST', { email, password }, '')).body.accessToken as string;
   const asToken = (tok: string) => (path: string, method = 'GET', body?: unknown) => raw(path, method, body, tok);
 
-  return { makeLead, manager, login, asToken, call, team, exec, setActive, property, close: async () => { server.close(); await pool.end(); } };
+  return { makeLead, manager, login, asToken, call, team, exec, setActive, property, base, close: async () => { await closeSocketServer(); server.close(); await pool.end(); } };
 }

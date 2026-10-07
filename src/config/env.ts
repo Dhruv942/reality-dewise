@@ -16,6 +16,10 @@ const schema = z.object({
   LEAD_TIMEOUT_JOB_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   /** How often the sweep looks for timed-out leads. The SLA duration itself is an admin setting (default 90 minutes, counted 24/7). */
   LEAD_TIMEOUT_CHECK_INTERVAL_SECONDS: z.coerce.number().int().min(5).default(60),
+  /** Minutes before the SLA expires at which the assigned executive is warned (0 = no warning). Capped at half the SLA. */
+  SLA_WARNING_MINUTES: z.coerce.number().int().min(0).default(10),
+  /** Comma-separated browser origins allowed to open a Socket.IO connection. Empty = same as CORS_ORIGINS. */
+  SOCKET_CORS_ORIGIN: z.string().default(''),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   LOGIN_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
 });
@@ -27,4 +31,8 @@ if (!parsed.success) {
   throw new Error(`Invalid environment configuration:\n  ${problems.join('\n  ')}`);
 }
 
-export const env = { ...parsed.data, corsOrigins: parsed.data.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean) };
+const origins = (v: string) => v.split(',').map((o) => o.trim()).filter(Boolean);
+const corsOrigins = origins(parsed.data.CORS_ORIGINS);
+const socketOrigins = origins(parsed.data.SOCKET_CORS_ORIGIN);
+
+export const env = { ...parsed.data, corsOrigins, socketCorsOrigins: socketOrigins.length > 0 ? socketOrigins : corsOrigins };

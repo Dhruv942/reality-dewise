@@ -4,6 +4,7 @@ import * as executiveRepo from '../executives/executive.repository';
 import * as assignmentRepo from '../assignment/assignment.repository';
 import * as settingsRepo from '../settings/settings.repository';
 import { pool } from '../../database/pool';
+import { env } from '../../config/env';
 import * as customerRepo from '../customers/customer.repository';
 import * as propertyRepo from '../properties/property.repository';
 import type { UserRole } from '../users/user.model';
@@ -11,6 +12,7 @@ import type { CustomerType } from '../customers/customer.model';
 import type { PropertySource } from '../properties/property.model';
 import { propertyAssignmentService } from '../assignment/assignment.service';
 import * as repo from './lead.repository';
+import { publishAssignment, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
 import { toLeadDto, type LeadStatus } from './lead.model';
 
 export interface NewLeadInput {
@@ -78,6 +80,7 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
       const row = await propertyRepo.findById(property.id, tx);
       return { leadId: id, notice: pendingNotice(row!.name) };
     });
+    await publishLeadCreated(leadId); // after the commit: a failed lead never announces itself
     return { created: true, lead: toLeadDto((await repo.findById(leadId, undefined, undefined, viewerId))!), ...(notice ? { notice } : {}) };
   } catch (err) {
     // The same external enquiry arrived twice at once: the other request won, return its lead.
@@ -92,8 +95,9 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
 /**
  * Called when a property gets executives: assigns its PENDING_ASSIGNMENT leads, oldest first, through the
  * same round-robin. Runs inside the caller's transaction. Returns how many leads were assigned.
+ * `assignedIds` (optional) collects those leads so the caller can announce them once its transaction commits.
  */
-export async function assignPendingLeads(propertyId: string, tx: Db): Promise<number> {
+export async function assignPendingLeads(propertyId: string, tx: Db, assignedIds?: string[]): Promise<number> {
   const property = await propertyRepo.findById(propertyId, tx);
   if (!property?.is_active) return 0;
   let assigned = 0;
@@ -101,6 +105,7 @@ export async function assignPendingLeads(propertyId: string, tx: Db): Promise<nu
     const result = await propertyAssignmentService.assignLeadToProperty(propertyId, leadId, tx);
     if (!result) break; // nobody available: the rest stay pending
     await repo.markAssigned(tx, leadId, result.executiveId);
+    assignedIds?.push(leadId);
     assigned++;
   }
   return assigned;
@@ -151,6 +156,7 @@ export async function updateStatus(
     throw new AppError(409, 'This lead is pending assignment. Assign executives to its property first.');
   }
   await repo.setStatus(id, status);
+  await publishStatusUpdated({ leadId: id, previousStatus: lead.status, actorId: viewerId });
   return getLead(id, ownerId, viewerId);
 }
 
@@ -187,6 +193,7 @@ export async function assignLead(id: string, executiveId: string, actor: { id: s
       assignedById: actor.id,
     });
   });
+  await publishAssignment({ leadId: id, previousExecutiveId: lead.executive_id, reason: 'MANUAL' });
   return getLead(id, undefined, actor.id);
 }
 
@@ -213,15 +220,35 @@ export async function setImportant(id: string, actor: { id: string; role: UserRo
  * sweeps can never reassign the same lead twice. The Important flag plays no part in any of this.
  */
 export async function reassignTimedOutLead(leadId: string, minutes: number, at?: Date): Promise<'reassigned' | 'skipped'> {
-  return withTransaction(async (tx) => {
+  const moved = await withTransaction(async (tx) => {
     const lead = await repo.lockTimedOut(tx, leadId, minutes, at);
-    if (!lead) return 'skipped';
+    if (!lead) return null;
     const next = await propertyAssignmentService.pickForReassignment(tx, lead.property_id, [lead.executive_id]);
-    if (!next) return 'skipped'; // nobody else can take it (single executive, all inactive, inactive property)
+    if (!next) return null; // nobody else can take it (single executive, all inactive, inactive property)
     await repo.assignTo(tx, leadId, next, at);
     await assignmentRepo.insertHistory(tx, { propertyId: lead.property_id, executiveId: next, leadId, method: 'TIMEOUT' });
-    return 'reassigned';
+    return { previousExecutiveId: lead.executive_id, expiredAssignedAt: lead.assigned_at };
   });
+  if (!moved) return 'skipped';
+  await publishSlaReassignment({ leadId, ...moved }); // committed: now tell the people involved
+  return 'reassigned';
+}
+
+/**
+ * Warns the assigned executive shortly before the SLA runs out (SLA_WARNING_MINUTES, never more than half the SLA;
+ * 0 disables it). Read-only on leads: it does not touch the SLA or the reassignment, it only notifies, once per
+ * assignment. Safe to run from several processes and to repeat. Returns how many warnings were sent.
+ */
+export async function runSlaWarningPass(limit = 500, at?: Date): Promise<number> {
+  const timeoutMinutes = await settingsRepo.getLeadTimeoutMinutes();
+  const warnMinutes = Math.min(env.SLA_WARNING_MINUTES, Math.floor(timeoutMinutes / 2));
+  if (warnMinutes <= 0) return 0;
+  const candidates = await repo.findSlaWarnable(timeoutMinutes, warnMinutes, limit, at);
+  let sent = 0;
+  for (const c of candidates) {
+    if (await publishSlaWarning({ leadId: c.id, executiveId: c.executive_id, assignedAt: c.assigned_at, timeoutMinutes }, at)) sent++;
+  }
+  return sent;
 }
 
 export interface TimeoutSweepResult {

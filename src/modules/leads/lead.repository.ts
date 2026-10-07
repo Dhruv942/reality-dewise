@@ -222,13 +222,34 @@ export async function lockTimedOut(
   id: string,
   minutes: number,
   at?: Date,
-): Promise<{ property_id: string; executive_id: string } | null> {
-  const { rows } = await db.query<{ property_id: string; executive_id: string }>(
-    `SELECT property_id, assigned_executive_id AS executive_id FROM leads
+): Promise<{ property_id: string; executive_id: string; assigned_at: Date } | null> {
+  const { rows } = await db.query<{ property_id: string; executive_id: string; assigned_at: Date }>(
+    `SELECT property_id, assigned_executive_id AS executive_id, assigned_at FROM leads
      WHERE id = $1 AND status = 'INCOMING' AND assigned_executive_id IS NOT NULL
        AND assigned_at <= COALESCE($3::timestamptz, now()) - make_interval(mins => $2)
      FOR UPDATE SKIP LOCKED`,
     [id, minutes, at ?? null],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Assigned, still INCOMING leads whose SLA has not expired yet but will within `warnMinutes`. Only a candidate
+ * list for the warning: whether one was already sent is decided by the notification's dedupe key.
+ */
+export async function findSlaWarnable(
+  timeoutMinutes: number,
+  warnMinutes: number,
+  limit: number,
+  at?: Date,
+): Promise<{ id: string; executive_id: string; assigned_at: Date }[]> {
+  const { rows } = await pool.query<{ id: string; executive_id: string; assigned_at: Date }>(
+    `SELECT id, assigned_executive_id AS executive_id, assigned_at FROM leads
+     WHERE status = 'INCOMING' AND assigned_executive_id IS NOT NULL
+       AND assigned_at <= COALESCE($4::timestamptz, now()) - make_interval(mins => $1::int - $2::int)
+       AND assigned_at >  COALESCE($4::timestamptz, now()) - make_interval(mins => $1::int)
+     ORDER BY assigned_at, id LIMIT $3`,
+    [timeoutMinutes, warnMinutes, limit, at ?? null],
+  );
+  return rows;
 }

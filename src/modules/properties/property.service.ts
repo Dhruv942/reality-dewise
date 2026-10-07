@@ -4,6 +4,7 @@ import * as executiveRepo from '../executives/executive.repository';
 import * as assignmentRepo from '../assignment/assignment.repository';
 import { toHistoryDto } from '../assignment/assignment.model';
 import { assignPendingLeads } from '../leads/lead.service';
+import { publishAssignment } from '../leads/lead.events';
 import * as repo from './property.repository';
 import { toPropertyDto, type PropertyRow } from './property.model';
 
@@ -63,10 +64,13 @@ async function assertAssignable(executiveIds: string[]): Promise<void> {
 export async function setExecutives(id: string, executiveIds: string[]) {
   await getProperty(id);
   await assertAssignable(executiveIds);
+  const assignedIds: string[] = [];
   const assignedPendingLeads = await withTransaction(async (tx) => {
     await repo.replaceExecutives(tx, id, executiveIds);
-    return assignPendingLeads(id, tx);
+    return assignPendingLeads(id, tx, assignedIds);
   });
+  // Committed: tell the newly assigned executives (and admin/managers) about each lead.
+  for (const leadId of assignedIds) await publishAssignment({ leadId, previousExecutiveId: null, reason: 'PENDING_ASSIGNED' });
   return { ...(await getPropertyDetails(id)), assignedPendingLeads };
 }
 

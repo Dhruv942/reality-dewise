@@ -83,6 +83,8 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 | `TRUST_PROXY` | no | unset | Number of proxies in front of the app (1 on most PaaS) so rate limiting sees the real IP |
 | `LEAD_TIMEOUT_JOB_ENABLED` | no | `true` | Runs the lead timeout sweep inside the API process (`false` to run it elsewhere) |
 | `LEAD_TIMEOUT_CHECK_INTERVAL_SECONDS` | no | `60` | How often the sweep looks for timed-out leads (min 5). The SLA duration itself is an admin setting (default 90 minutes, runs 24/7) |
+| `SOCKET_CORS_ORIGIN` | no | `CORS_ORIGINS` | Comma-separated origins allowed to open a Socket.IO connection. Empty and no `CORS_ORIGINS` = same-origin only |
+| `SLA_WARNING_MINUTES` | no | `10` | How long before the SLA runs out the executive gets `lead:sla-warning` (capped at half the SLA; `0` disables it) |
 | `LOGIN_RATE_LIMIT_MAX` / `LOGIN_RATE_LIMIT_WINDOW_MINUTES` | no | `10` / `15` | Failed-login limiter |
 | `SEED_*` | for `seed` | | Email, username, name and password for the admin, the manager (`SEED_MANAGER_*`), executive 1 (`SEED_EXECUTIVE_*`) and executives 2-3 (`SEED_EXECUTIVE_2_*`, `SEED_EXECUTIVE_3_*`), plus `SEED_TEAM_NAME`. **No default passwords exist**; an empty optional password skips that account |
 
@@ -179,7 +181,14 @@ Base path `/api/v1`. All errors look like `{ "success": false, "message": "…",
 | Manager portal | `/manager/teams`, `/manager/executives`, `/manager/leads` (list, get, `:id/assign`) | manager |
 | Executive portal | `/executive/leads` (list, `summary`, get, status) | sales executive / executive manager |
 | Important leads | `POST` / `DELETE` `…/leads/:id/important` in each portal; `isImportant` on every lead, `?important=true` filter | admin, manager, sales |
+| Notifications | `GET /notifications` (`?unread=true`, `limit`, `offset`; includes `unreadCount`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` | any logged-in user (own notifications only) |
 | Health | `GET /health` | public |
+
+### Real-time (Socket.IO)
+
+Socket.IO runs on the same HTTP server (path `/socket.io`) as an extra delivery channel; REST and PostgreSQL stay the source of truth. Connect with the same access token as the REST API: `io(url, { auth: { token } })` (or an `Authorization: Bearer` header). The server puts the socket in its rooms (clients cannot join rooms): `user:<id>` for everyone, `admin`, `managers` + `manager:<id>`, `executive:<id>`. The connection closes when the token expires (`auth:expired`); reconnect with a fresh token and fetch anything missed from `GET /notifications`.
+
+Events (sent only after the database change committed, only to people who may see the lead): `lead:created`, `lead:assigned`, `lead:reassigned`, `lead:status-updated`, `lead:sla-warning`, `lead:sla-expired`, and `notification:new` (the stored notification, to its owner). A previous executive receives `lead:reassigned` / `lead:sla-expired` without customer details.
 
 Request/response details for the assignment APIs (round robin, settings, SLA, manual assignment): [`docs/FRONTEND_ROUND_ROBIN_GUIDE.md`](docs/FRONTEND_ROUND_ROBIN_GUIDE.md).
 

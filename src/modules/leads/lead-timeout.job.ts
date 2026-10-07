@@ -1,4 +1,4 @@
-import { runLeadTimeoutSweep } from './lead.service';
+import { runLeadTimeoutSweep, runSlaWarningPass } from './lead.service';
 
 /**
  * Runs the lead timeout sweep on a timer inside the API process. No separate scheduler is needed: the sweep is
@@ -16,6 +16,8 @@ export function startLeadTimeoutJob(intervalSeconds: number): () => void {
       if (r.reassigned > 0 || r.failed > 0) {
         console.log(`Lead timeout (${r.timeoutMinutes} min): ${r.reassigned} reassigned, ${r.skipped} skipped, ${r.failed} failed`);
       }
+      const warned = await runSlaWarningPass();
+      if (warned > 0) console.log(`SLA warning: ${warned} executive(s) warned`);
     } catch (err) {
       console.error('Lead timeout sweep failed:', err instanceof Error ? err.message : err);
     } finally {
