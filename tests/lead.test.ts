@@ -263,7 +263,7 @@ describe('executive portal', () => {
 describe('client history and "assigned to you" awareness', () => {
   let hitesh: any, hCall: ReturnType<typeof t.asToken>, latest: any;
   const sunita = (extra: object) =>
-    t.call('/admin/leads', 'POST', { name: 'Sunita C Sinha', mobile: '9867613605', source: 'MAGICBRICKS', customerType: 'individual', ...extra });
+    t.call('/admin/leads', 'POST', { name: 'Sunita C Sinha', mobile: '9867613605', source: 'MAGICBRICKS', enquiryType: 'rent', ...extra });
 
   before(async () => {
     hitesh = await t.exec('hitesh');
@@ -279,17 +279,24 @@ describe('client history and "assigned to you" awareness', () => {
     assert.ok([a, b, latest].every((r) => r.status === 201));
     assert.equal(new Set([a, b, latest].map((r) => r.body.customer.id)).size, 1);
     assert.equal((await pool.query("SELECT count(*)::int n FROM customers WHERE mobile='+919867613605'")).rows[0].n, 1);
-    assert.equal(a.body.customer.type, 'INDIVIDUAL');
+    assert.equal(a.body.enquiryType, 'RENT');
+    assert.equal(a.body.customer.type, undefined, 'the Individual/Company type is gone');
     assert.equal(latest.body.requirement, '3 BHK on Rent');
     assert.ok(latest.body.leadNo > b.body.leadNo && b.body.leadNo > a.body.leadNo, 'lead numbers increase');
     assert.equal(a.body.assignedExecutive.id, hitesh.id);
   });
-  it('client type is set only when the client is first created', async () => {
-    const r = await sunita({ propertyName: 'Kalpataru Magnus', customerType: 'COMPANY', mobile: '9811111111', name: 'Acme Realty' });
-    assert.equal(r.body.customer.type, 'COMPANY');
-    const again = await sunita({ propertyName: 'Kalpataru Magnus', customerType: 'INDIVIDUAL', mobile: '9811111111' });
-    assert.equal(again.body.customer.type, 'COMPANY');
-    assert.equal((await sunita({ propertyName: 'Kalpataru Magnus', customerType: 'ALIEN', mobile: '9822222222' })).status, 400);
+  it('each enquiry has its own rent/buy type: optional, validated, per lead (not per client)', async () => {
+    const buy = await sunita({ propertyName: 'Kalpataru Magnus', enquiryType: 'BUY', mobile: '9811111111', name: 'Acme Realty' });
+    assert.equal(buy.body.enquiryType, 'BUY');
+    const rent = await sunita({ propertyName: 'Kalpataru Magnus', enquiryType: 'RENT', mobile: '9811111111' });
+    assert.equal(rent.body.enquiryType, 'RENT', 'same client, different enquiry');
+    assert.equal(rent.body.customer.id, buy.body.customer.id);
+    assert.equal((await t.call(`/admin/leads/${buy.body.id}`)).body.enquiryType, 'BUY', 'unchanged by the later lead');
+    const none = await sunita({ propertyName: 'Kalpataru Magnus', enquiryType: undefined, mobile: '9833333333' });
+    assert.equal(none.status, 201);
+    assert.equal(none.body.enquiryType, null);
+    assert.equal((await sunita({ propertyName: 'Kalpataru Magnus', enquiryType: 'LEASE', mobile: '9822222222' })).status, 400);
+    assert.equal((await sunita({ propertyName: 'Kalpataru Magnus', customerType: 'COMPANY', mobile: '9844444444' })).status, 400, 'the old field is rejected');
   });
   it('opening the current lead shows the complete client history (executive and admin)', async () => {
     const asExec = await hCall(`/executive/leads/${latest.body.id}`);

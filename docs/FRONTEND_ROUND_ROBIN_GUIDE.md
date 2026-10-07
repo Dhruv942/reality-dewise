@@ -232,7 +232,7 @@ Property object:
 ```json
 { "name": "Sunita C Sinha", "mobile": "9867613605", "email": "s@example.com",
   "propertyName": "Rustomjee Oriana / Seasons", "source": "MAGICBRICKS",
-  "requirement": "3 BHK on Rent", "budget": 250000, "customerType": "INDIVIDUAL",
+  "requirement": "3 BHK on Rent", "budget": 250000, "enquiryType": "RENT",
   "message": "Looking for a rental", "externalLeadId": "ENQ-1001" }
 ```
 
@@ -241,7 +241,7 @@ Property object:
 | `name`, `mobile`, `propertyName`, `source` | required. `source` is `99ACRES` or `MAGICBRICKS` |
 | `requirement` | optional text, max 200 |
 | `budget` | optional number in rupees |
-| `customerType` | optional `INDIVIDUAL` (default) or `COMPANY`; only used when this creates a new client |
+| `enquiryType` | optional `RENT` or `BUY` (any casing). Stored on this lead; the same client can have a rent and a buy enquiry. Returned as `enquiryType` (`null` when not sent). **Replaces `customerType`, which no longer exists** (sending it returns `400`, and `customer.type` is no longer returned) |
 | `email`, `message` (max 2000), `externalLeadId` | optional. The same `source` + `externalLeadId` again returns the existing lead (`200`) |
 | anything else | `400` |
 

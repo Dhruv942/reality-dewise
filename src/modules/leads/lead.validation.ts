@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import { CUSTOMER_TYPES } from '../customers/customer.model';
 import { customerEmail, customerMobile, customerName } from '../customers/customer.validation';
 import { PROPERTY_SOURCES } from '../properties/property.model';
-import { LEAD_STATUSES, PIPELINE_STATUSES } from './lead.model';
+import { ENQUIRY_TYPES, LEAD_STATUSES, PIPELINE_STATUSES } from './lead.model';
 
 export const idParam = z.object({ id: z.uuid('Invalid id') });
 
@@ -19,12 +18,12 @@ export const createLeadSchema = z.strictObject({
     .pipe(z.enum(PROPERTY_SOURCES, { error: `Source must be one of: ${PROPERTY_SOURCES.join(', ')}` })),
   // What the client wants, e.g. "3 BHK on Rent".
   requirement: z.string().trim().max(200).nullish(),
-  // Only used when this enquiry creates a brand-new client; an existing client keeps theirs.
-  customerType: z
+  // Does the client want to rent or buy? Optional; case-insensitive.
+  enquiryType: z
     .string()
     .trim()
     .toUpperCase()
-    .pipe(z.enum(CUSTOMER_TYPES, { error: `Customer type must be one of: ${CUSTOMER_TYPES.join(', ')}` }))
+    .pipe(z.enum(ENQUIRY_TYPES, { error: `Enquiry type must be one of: ${ENQUIRY_TYPES.join(', ')}` }))
     .nullish(),
   budget: z.number({ error: 'Budget must be a number (in rupees)' }).min(0).max(1e12).nullish(),
   message: z.string().trim().max(2000).nullish(),

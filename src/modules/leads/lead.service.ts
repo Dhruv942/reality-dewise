@@ -8,7 +8,6 @@ import { env } from '../../config/env';
 import * as customerRepo from '../customers/customer.repository';
 import * as propertyRepo from '../properties/property.repository';
 import type { UserRole } from '../users/user.model';
-import type { CustomerType } from '../customers/customer.model';
 import type { PropertySource } from '../properties/property.model';
 import { propertyAssignmentService } from '../assignment/assignment.service';
 import * as repo from './lead.repository';
@@ -16,7 +15,7 @@ import * as activityRepo from './lead-activity.repository';
 import type { ActivityRow } from './lead-activity.repository';
 import { recordAssigned, recordReceived, recordStatus, recordTimeout } from './lead-activity.service';
 import { publishAssignment, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
-import { toLeadDto, type LeadStatus } from './lead.model';
+import { toLeadDto, type EnquiryType, type LeadStatus } from './lead.model';
 
 export interface NewLeadInput {
   name: string;
@@ -27,7 +26,8 @@ export interface NewLeadInput {
   source: PropertySource;
   budget?: number | null;
   requirement?: string | null;
-  customerType?: CustomerType | null;
+  /** Does the client want to rent or buy? Optional. */
+  enquiryType?: EnquiryType | null;
   message?: string | null;
   /** Portal's own enquiry id. When given, submitting the same one again returns the existing lead. */
   externalLeadId?: string | null;
@@ -65,7 +65,6 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         name: input.name,
         mobile: input.mobile,
         email: input.email ?? null,
-        type: input.customerType ?? undefined,
       });
       const id = await repo.insert(tx, {
         customerId: customer.id,
@@ -73,6 +72,7 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         source,
         message: input.message ?? null,
         requirement: input.requirement ?? null,
+        enquiryType: input.enquiryType ?? null,
         budget: input.budget ?? null,
         propertyName: input.propertyName,
         externalLeadId,

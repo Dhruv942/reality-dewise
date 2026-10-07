@@ -58,12 +58,12 @@ erDiagram
 
   users { uuid id PK  text email  text username  user_role role  bool is_active  uuid team_id FK  timestamptz deleted_at }
   teams { uuid id PK  text name  bool is_active }
-  customers { uuid id PK  text name  text mobile "UNIQUE, +E.164"  text email  customer_type type }
+  customers { uuid id PK  text name  text mobile "UNIQUE, +E.164"  text email }
   properties { uuid id PK  text name  text name_key "UNIQUE, generated"  bool is_active  bool is_stub }
   property_executives { uuid property_id PK  uuid executive_id PK }
   property_assignment_state { uuid property_id PK  uuid last_assigned_executive_id }
   property_assignment_history { uuid id PK  uuid property_id FK  uuid executive_id FK  uuid lead_id "UNIQUE" }
-  leads { uuid id PK  bigint lead_no "UNIQUE"  uuid customer_id FK  uuid property_id FK  uuid assigned_executive_id FK  lead_status status  property_source source  text requirement  numeric budget  timestamptz assigned_at  timestamptz seen_at }
+  leads { uuid id PK  bigint lead_no "UNIQUE"  uuid customer_id FK  uuid property_id FK  uuid assigned_executive_id FK  lead_status status  property_source source  text requirement  enquiry_type enquiry_type  numeric budget  timestamptz assigned_at  timestamptz seen_at }
 ```
 
 Key constraints (enforced by the database, not only the code):

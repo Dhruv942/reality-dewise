@@ -3,7 +3,7 @@ import { patchRow } from '../../database/patch';
 import type { Db } from '../../database/transaction';
 import { escapeLike } from '../teams/team.repository';
 import type { PropertySource } from '../properties/property.model';
-import type { LeadRow, LeadStatus } from './lead.model';
+import type { EnquiryType, LeadRow, LeadStatus } from './lead.model';
 
 export const LEAD_EXTERNAL_UNIQUE = 'leads_source_external_lead_id_key';
 
@@ -12,8 +12,8 @@ const IMPORTANT = (viewer: string) =>
   `EXISTS (SELECT 1 FROM lead_important li WHERE li.lead_id = l.id AND li.user_id = ${viewer}::uuid)`;
 
 const select = (viewer: string) => `
-  SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.message, l.requirement, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.source, l.created_at, l.updated_at,
-         c.id AS customer_id, c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email, c.type AS customer_type,
+  SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.message, l.requirement, l.enquiry_type, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.source, l.created_at, l.updated_at,
+         c.id AS customer_id, c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email,
          p.id AS property_id, p.name AS property_name, p.location AS property_location,
          u.id AS executive_id, u.name AS executive_name,
          COALESCE((SELECT value::int FROM app_settings WHERE key = 'lead_timeout_minutes' AND value ~ '^[0-9]+$'), 90) AS sla_minutes
@@ -113,6 +113,7 @@ export async function insert(
     source: PropertySource;
     message: string | null;
     requirement: string | null;
+    enquiryType: EnquiryType | null;
     budget: number | null;
     propertyName: string;
     externalLeadId: string | null;
@@ -120,9 +121,9 @@ export async function insert(
   },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO leads (customer_id, property_id, source, status, message, requirement, budget, property_name, external_lead_id, raw_payload)
-     VALUES ($1, $2, $3, 'PENDING_ASSIGNMENT', $4, $5, $6, $7, $8, $9) RETURNING id`,
-    [l.customerId, l.propertyId, l.source, l.message, l.requirement, l.budget, l.propertyName, l.externalLeadId, l.rawPayload ?? null],
+    `INSERT INTO leads (customer_id, property_id, source, status, message, requirement, enquiry_type, budget, property_name, external_lead_id, raw_payload)
+     VALUES ($1, $2, $3, 'PENDING_ASSIGNMENT', $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+    [l.customerId, l.propertyId, l.source, l.message, l.requirement, l.enquiryType, l.budget, l.propertyName, l.externalLeadId, l.rawPayload ?? null],
   );
   return rows[0].id;
 }

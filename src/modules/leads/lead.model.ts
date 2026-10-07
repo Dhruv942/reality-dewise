@@ -1,10 +1,12 @@
-import type { CustomerType } from '../customers/customer.model';
 import type { PropertySource } from '../properties/property.model';
 
 export const LEAD_STATUSES = ['PENDING_ASSIGNMENT', 'INCOMING', 'RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'BROKER'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 /** Statuses a person may set. PENDING_ASSIGNMENT is system-managed: it ends when an executive is assigned. */
 export const PIPELINE_STATUSES = LEAD_STATUSES.filter((s) => s !== 'PENDING_ASSIGNMENT') as Exclude<LeadStatus, 'PENDING_ASSIGNMENT'>[];
+
+export const ENQUIRY_TYPES = ['RENT', 'BUY'] as const;
+export type EnquiryType = (typeof ENQUIRY_TYPES)[number];
 
 export interface LeadRow {
   id: string;
@@ -15,7 +17,7 @@ export interface LeadRow {
   requirement: string | null;
   assigned_at: Date | null;
   seen_at: Date | null;
-  customer_type: CustomerType;
+  enquiry_type: EnquiryType | null;
   budget: string | null; // numeric comes back from pg as a string
   requested_property_name: string | null;
   external_lead_id: string | null;
@@ -43,11 +45,13 @@ export const toLeadDto = (l: LeadRow) => ({
   status: l.status,
   message: l.message,
   requirement: l.requirement,
+  // Whether the client wants to rent or buy. null when the enquiry did not say.
+  enquiryType: l.enquiry_type,
   budget: l.budget === null ? null : Number(l.budget),
   requestedPropertyName: l.requested_property_name,
   externalLeadId: l.external_lead_id,
   source: l.source,
-  customer: { id: l.customer_id, name: l.customer_name, mobile: l.customer_mobile, email: l.customer_email, type: l.customer_type },
+  customer: { id: l.customer_id, name: l.customer_name, mobile: l.customer_mobile, email: l.customer_email },
   // The property the customer is asking about.
   property: {
     id: l.property_id,
