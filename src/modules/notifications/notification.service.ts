@@ -1,5 +1,6 @@
 import { NotFoundError } from '../../utils/errors';
 import { emitTo, rooms } from '../../realtime/socket';
+import { pushNotification } from '../push/push.service';
 import * as repo from './notification.repository';
 import { toNotificationDto } from './notification.model';
 
@@ -16,6 +17,7 @@ export async function notify(n: repo.NewNotification): Promise<boolean> {
   }
   console.log(`Notification created: ${n.type} id=${row.id} for user ${n.userId} (${n.entityType} ${n.entityId})`);
   emitTo('notification:new', [rooms.user(n.userId)], toNotificationDto(row), `id=${row.id} type=${n.type}`);
+  pushNotification(row); // closed-app delivery (Web Push); does not block or fail the caller
   return true;
 }
 

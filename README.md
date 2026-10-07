@@ -85,6 +85,7 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 | `LEAD_TIMEOUT_CHECK_INTERVAL_SECONDS` | no | `60` | How often the sweep looks for timed-out leads (min 5). The SLA duration itself is an admin setting (default 90 minutes, runs 24/7) |
 | `SOCKET_CORS_ORIGIN` | no | `CORS_ORIGINS` | Comma-separated origins allowed to open a Socket.IO connection. Empty and no `CORS_ORIGINS` = same-origin only |
 | `SLA_WARNING_MINUTES` | no | `10` | How long before the SLA runs out the executive gets `lead:sla-warning` (capped at half the SLA; `0` disables it) |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | unset | Web Push for closed-app notifications. Set all three or none. Generate: `npx web-push generate-vapid-keys`; subject like `mailto:ops@example.com` |
 | `LOGIN_RATE_LIMIT_MAX` / `LOGIN_RATE_LIMIT_WINDOW_MINUTES` | no | `10` / `15` | Failed-login limiter |
 | `SEED_*` | for `seed` | | Email, username, name and password for the admin, the manager (`SEED_MANAGER_*`), executive 1 (`SEED_EXECUTIVE_*`) and executives 2-3 (`SEED_EXECUTIVE_2_*`, `SEED_EXECUTIVE_3_*`), plus `SEED_TEAM_NAME`. **No default passwords exist**; an empty optional password skips that account |
 
@@ -182,6 +183,7 @@ Base path `/api/v1`. All errors look like `{ "success": false, "message": "…",
 | Executive portal | `/executive/leads` (list, `summary`, get, status) | sales executive / executive manager |
 | Important leads | `POST` / `DELETE` `…/leads/:id/important` in each portal; `isImportant` on every lead, `?important=true` filter | admin, manager, sales |
 | Notifications | `GET /notifications` (`?unread=true`, `limit`, `offset`; includes `unreadCount`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` | any logged-in user (own notifications only) |
+| Web Push | `GET /push/public-key`, `POST /push/subscriptions`, `DELETE /push/subscriptions` (own devices only). See `docs/FRONTEND_PUSH_GUIDE.md` | any logged-in user |
 | Health | `GET /health` | public |
 
 ### Real-time (Socket.IO)

@@ -12,6 +12,9 @@ import type { CustomerType } from '../customers/customer.model';
 import type { PropertySource } from '../properties/property.model';
 import { propertyAssignmentService } from '../assignment/assignment.service';
 import * as repo from './lead.repository';
+import * as activityRepo from './lead-activity.repository';
+import type { ActivityRow } from './lead-activity.repository';
+import { recordAssigned, recordReceived, recordStatus, recordTimeout } from './lead-activity.service';
 import { publishAssignment, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
 import { toLeadDto, type LeadStatus } from './lead.model';
 
@@ -55,6 +58,7 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
   }
 
   try {
+    const activities: ActivityRow[] = [];
     const { leadId, notice } = await withTransaction(async (tx) => {
       const property = await propertyRepo.findOrCreateStub(tx, input.propertyName);
       const customer = await customerRepo.upsertByMobile(tx, {
@@ -74,6 +78,7 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         externalLeadId,
         rawPayload: input.rawPayload,
       });
+      activities.push(await recordReceived(tx, id, source, viewerId));
       if (input.assignTo) {
         const row = await propertyRepo.findById(property.id, tx);
         if (!row?.is_active) throw new AppError(409, 'Property is inactive and cannot receive leads');
@@ -85,17 +90,19 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
           method: 'MANUAL',
           assignedById: input.assignTo.byId,
         });
+        activities.push(...(await recordAssigned(tx, { leadId: id, executiveId: input.assignTo.executiveId, how: 'MANUAL', byId: input.assignTo.byId })));
         return { leadId: id, notice: undefined };
       }
       const assignment = await propertyAssignmentService.assignLeadToProperty(property.id, id, tx);
       if (assignment) {
         await repo.markAssigned(tx, id, assignment.executiveId);
+        activities.push(...(await recordAssigned(tx, { leadId: id, executiveId: assignment.executiveId, how: 'ROUND_ROBIN' })));
         return { leadId: id, notice: undefined };
       }
       const row = await propertyRepo.findById(property.id, tx);
       return { leadId: id, notice: pendingNotice(row!.name) };
     });
-    await publishLeadCreated(leadId); // after the commit: a failed lead never announces itself
+    await publishLeadCreated(leadId, activities); // after the commit: a failed lead never announces itself
     return { created: true, lead: toLeadDto((await repo.findById(leadId, undefined, undefined, viewerId))!), ...(notice ? { notice } : {}) };
   } catch (err) {
     // The same external enquiry arrived twice at once: the other request won, return its lead.
@@ -127,7 +134,7 @@ export async function assertAssignable(executiveId: string, managerId?: string):
  * same round-robin. Runs inside the caller's transaction. Returns how many leads were assigned.
  * `assignedIds` (optional) collects those leads so the caller can announce them once its transaction commits.
  */
-export async function assignPendingLeads(propertyId: string, tx: Db, assignedIds?: string[]): Promise<number> {
+export async function assignPendingLeads(propertyId: string, tx: Db, assignedIds?: string[], activities?: ActivityRow[]): Promise<number> {
   const property = await propertyRepo.findById(propertyId, tx);
   if (!property?.is_active) return 0;
   let assigned = 0;
@@ -135,6 +142,8 @@ export async function assignPendingLeads(propertyId: string, tx: Db, assignedIds
     const result = await propertyAssignmentService.assignLeadToProperty(propertyId, leadId, tx);
     if (!result) break; // nobody available: the rest stay pending
     await repo.markAssigned(tx, leadId, result.executiveId);
+    const written = await recordAssigned(tx, { leadId, executiveId: result.executiveId, how: 'PENDING_ASSIGNED' });
+    activities?.push(...written);
     assignedIds?.push(leadId);
     assigned++;
   }
@@ -153,7 +162,8 @@ export async function getLeadDetail(id: string, ownerId?: string, managerId?: st
     const { customer: _c, ...entry } = toLeadDto(r);
     return entry;
   });
-  return { ...lead, customerHistory: history, customerEnquiryCount: history.length + 1 };
+  const activity = (await activityRepo.listForLead(id)).map(activityRepo.toActivityDto);
+  return { ...lead, customerHistory: history, customerEnquiryCount: history.length + 1, activity };
 }
 
 /** Executive dashboard numbers: how many leads are new (unopened) and the split by status. */
@@ -181,12 +191,19 @@ export async function updateStatus(
   ownerId?: string,
   viewerId?: string,
 ) {
-  const lead = await getLead(id, ownerId);
-  if (lead.status === 'PENDING_ASSIGNMENT') {
-    throw new AppError(409, 'This lead is pending assignment. Assign executives to its property first.');
-  }
-  await repo.setStatus(id, status);
-  await publishStatusUpdated({ leadId: id, previousStatus: lead.status, actorId: viewerId });
+  // One transaction with the row locked: the SLA sweep skips a locked lead, and an executive whose lead the sweep
+  // already moved finds it is no longer theirs. So a status change and a timeout reassignment can never both win.
+  const { previousStatus, activity } = await withTransaction(async (tx) => {
+    const current = await repo.lockForStatus(tx, id, ownerId);
+    if (!current) throw new NotFoundError('Lead not found');
+    if (current.status === 'PENDING_ASSIGNMENT') {
+      throw new AppError(409, 'This lead is pending assignment. Assign executives to its property first.');
+    }
+    await repo.setStatusIn(tx, id, status);
+    const written = await recordStatus(tx, { leadId: id, status, actorId: viewerId, executiveId: current.executive_id });
+    return { previousStatus: current.status, activity: written };
+  });
+  await publishStatusUpdated({ leadId: id, previousStatus, actorId: viewerId, activities: [activity] });
   return getLead(id, ownerId, viewerId);
 }
 
@@ -206,7 +223,7 @@ export async function assignLead(id: string, executiveId: string, actor: { id: s
   await assertAssignable(executiveId, managerId);
 
   if (lead.executive_id === executiveId) return getLead(id, undefined, actor.id); // already theirs: nothing to do
-  await withTransaction(async (tx) => {
+  const activities = await withTransaction(async (tx) => {
     await repo.assignTo(tx, id, executiveId);
     await assignmentRepo.insertHistory(tx, {
       propertyId: lead.property_id,
@@ -215,8 +232,9 @@ export async function assignLead(id: string, executiveId: string, actor: { id: s
       method: 'MANUAL',
       assignedById: actor.id,
     });
+    return recordAssigned(tx, { leadId: id, executiveId, how: 'MANUAL', byId: actor.id });
   });
-  await publishAssignment({ leadId: id, previousExecutiveId: lead.executive_id, reason: 'MANUAL' });
+  await publishAssignment({ leadId: id, previousExecutiveId: lead.executive_id, reason: 'MANUAL', activities });
   return getLead(id, undefined, actor.id);
 }
 
@@ -250,7 +268,8 @@ export async function reassignTimedOutLead(leadId: string, minutes: number, at?:
     if (!next) return null; // nobody else can take it (single executive, all inactive, inactive property)
     await repo.assignTo(tx, leadId, next, at);
     await assignmentRepo.insertHistory(tx, { propertyId: lead.property_id, executiveId: next, leadId, method: 'TIMEOUT' });
-    return { previousExecutiveId: lead.executive_id, expiredAssignedAt: lead.assigned_at };
+    const activities = await recordTimeout(tx, { leadId, previousExecutiveId: lead.executive_id, executiveId: next });
+    return { previousExecutiveId: lead.executive_id, expiredAssignedAt: lead.assigned_at, activities };
   });
   if (!moved) return 'skipped';
   await publishSlaReassignment({ leadId, ...moved }); // committed: now tell the people involved
@@ -301,4 +320,9 @@ export async function runLeadTimeoutSweep(limit = 500, at?: Date): Promise<Timeo
     }
   }
   return result;
+}
+
+/** Milliseconds until the next lead's SLA runs out (the job wakes up then instead of waiting for its interval). */
+export async function msUntilNextTimeout(): Promise<number | null> {
+  return repo.msUntilNextTimeout(await settingsRepo.getLeadTimeoutMinutes());
 }

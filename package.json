@@ -27,6 +27,7 @@
     "node-pg-migrate": "^9.0.0",
     "pg": "^8.23.0",
     "socket.io": "^4.8.4",
+    "web-push": "^3.6.7",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -35,6 +36,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.3",
     "@types/pg": "^8.23.1",
+    "@types/web-push": "^3.6.4",
     "socket.io-client": "^4.8.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

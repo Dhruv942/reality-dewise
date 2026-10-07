@@ -113,6 +113,9 @@ export function emitTo(event: string, to: string[], payload: unknown, about = ''
   console.log(`Socket emit: ${event}${about ? ` ${about}` : ''} -> [${targets.join(', ')}]${skipped} (${clientsIn(server, targets)} client(s))`);
 }
 
+/** True while the user has at least one open socket (the app is open and will show the notification itself). */
+export const hasLiveSocket = (userId: string): boolean => (io?.sockets.adapter.rooms.get(rooms.user(userId))?.size ?? 0) > 0;
+
 /** Ends every live connection of a user (deactivated, deleted, password changed): they must log in again. */
 export function disconnectUser(userId: string): void {
   if (!io) return;

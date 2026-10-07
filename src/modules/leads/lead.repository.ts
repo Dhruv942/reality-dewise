@@ -15,7 +15,8 @@ const select = (viewer: string) => `
   SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.message, l.requirement, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.source, l.created_at, l.updated_at,
          c.id AS customer_id, c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email, c.type AS customer_type,
          p.id AS property_id, p.name AS property_name, p.location AS property_location,
-         u.id AS executive_id, u.name AS executive_name
+         u.id AS executive_id, u.name AS executive_name,
+         COALESCE((SELECT value::int FROM app_settings WHERE key = 'lead_timeout_minutes' AND value ~ '^[0-9]+$'), 90) AS sla_minutes
   FROM leads l
   JOIN customers c ON c.id = l.customer_id
   JOIN properties p ON p.id = l.property_id
@@ -142,6 +143,31 @@ export async function lockPendingIds(db: Db, propertyId: string): Promise<string
 }
 
 export const setStatus = (id: string, status: LeadStatus) => patchRow('leads', id, { status });
+
+/**
+ * Locks the lead row for a status change. With `ownerId` (an executive) the lead must still be theirs: if the SLA
+ * sweep moved it first, this returns null. While we hold the lock the sweep skips the lead, so a status change and a
+ * timeout reassignment can never both win.
+ */
+export async function lockForStatus(db: Db, id: string, ownerId?: string): Promise<{ status: LeadStatus; executive_id: string | null } | null> {
+  const params: unknown[] = [id];
+  let sql = 'SELECT status, assigned_executive_id AS executive_id FROM leads WHERE id = $1';
+  if (ownerId) sql += ` AND assigned_executive_id = $${params.push(ownerId)}`;
+  return (await db.query(`${sql} FOR UPDATE`, params)).rows[0] ?? null;
+}
+
+export const setStatusIn = (db: Db, id: string, status: LeadStatus) =>
+  db.query('UPDATE leads SET status = $2 WHERE id = $1', [id, status]);
+
+/** Milliseconds (database clock) until the earliest INCOMING lead's SLA runs out; null when none is running. */
+export async function msUntilNextTimeout(minutes: number): Promise<number | null> {
+  const { rows } = await pool.query<{ ms: string | null }>(
+    `SELECT (EXTRACT(EPOCH FROM (min(assigned_at) + make_interval(mins => $1) - now())) * 1000)::bigint AS ms
+     FROM leads WHERE status = 'INCOMING' AND assigned_executive_id IS NOT NULL`,
+    [minutes],
+  );
+  return rows[0]?.ms == null ? null : Number(rows[0].ms);
+}
 
 /** The executive opened the lead: the "New" indicator goes away. Only the first open counts. */
 export const markSeen = async (id: string, executiveId: string): Promise<void> => {

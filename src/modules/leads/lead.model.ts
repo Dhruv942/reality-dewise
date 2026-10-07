@@ -31,6 +31,8 @@ export interface LeadRow {
   property_location: string | null;
   executive_id: string | null;
   executive_name: string | null;
+  /** The admin's SLA setting at the time of the query (minutes). */
+  sla_minutes: number;
 }
 
 export const toLeadDto = (l: LeadRow) => ({
@@ -56,6 +58,11 @@ export const toLeadDto = (l: LeadRow) => ({
   // For the assigned executive: true until they first open the lead (the "New / Assigned to you" badge).
   isNew: l.executive_id !== null && l.seen_at === null,
   assignedAt: l.assigned_at,
+  // The backend's own deadline for the assigned executive's first status change. The portal only counts down to it.
+  sla:
+    l.status === 'INCOMING' && l.executive_id && l.assigned_at
+      ? { minutes: l.sla_minutes, deadline: new Date(l.assigned_at.getTime() + l.sla_minutes * 60_000), now: new Date() }
+      : null,
   createdAt: l.created_at,
   updatedAt: l.updated_at,
 });

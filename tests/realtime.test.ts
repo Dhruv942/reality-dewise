@@ -299,18 +299,18 @@ describe('SLA warning, expiry and automatic reassignment', () => {
     await settle();
 
     // Old executive (and their manager, admin): expired first, then the reassignment, no customer data in it.
-    const orderA = x.A.events.filter((e) => e.name.startsWith('lead:')).map((e) => e.name);
+    const orderA = x.A.events.filter((e) => e.name.startsWith('lead:') && e.name !== 'lead:activity-created').map((e) => e.name);
     assert.deepEqual(orderA, ['lead:sla-expired', 'lead:reassigned']);
     assert.equal(x.A.of('lead:reassigned')[0].lead, undefined);
     assert.deepEqual(x.A.of('notification:new').map((m) => m.type), ['SLA_EXPIRED']);
-    assert.deepEqual(x.admin.events.filter((e) => e.name.startsWith('lead:')).map((e) => e.name), ['lead:sla-expired', 'lead:reassigned']);
-    assert.deepEqual(x.M1.events.filter((e) => e.name.startsWith('lead:')).map((e) => e.name), ['lead:sla-expired', 'lead:reassigned']);
+    assert.deepEqual(x.admin.events.filter((e) => e.name.startsWith('lead:') && e.name !== 'lead:activity-created').map((e) => e.name), ['lead:sla-expired', 'lead:reassigned']);
+    assert.deepEqual(x.M1.events.filter((e) => e.name.startsWith('lead:') && e.name !== 'lead:activity-created').map((e) => e.name), ['lead:sla-expired', 'lead:reassigned']);
     // New executive and their manager: the reassignment with the lead.
-    assert.deepEqual(x.B.events.filter((e) => e.name.startsWith('lead:')).map((e) => e.name), ['lead:reassigned']);
+    assert.deepEqual(x.B.events.filter((e) => e.name.startsWith('lead:') && e.name !== 'lead:activity-created').map((e) => e.name), ['lead:reassigned']);
     assert.equal(x.B.of('lead:reassigned')[0].reason, 'SLA_TIMEOUT');
     assert.equal(x.B.of('lead:reassigned')[0].lead.assignedExecutive.id, b.id);
     assert.deepEqual(x.B.of('notification:new').map((m) => m.type), ['LEAD_REASSIGNED']);
-    assert.deepEqual(x.M2.events.filter((e) => e.name.startsWith('lead:')).map((e) => e.name), ['lead:reassigned']);
+    assert.deepEqual(x.M2.events.filter((e) => e.name.startsWith('lead:') && e.name !== 'lead:activity-created').map((e) => e.name), ['lead:reassigned']);
     // Admin and managers in scope are notified too.
     assert.deepEqual(x.admin.of('notification:new').map((m) => m.type), ['LEAD_REASSIGNED']);
     assert.deepEqual(x.M1.of('notification:new').map((m) => m.type), ['LEAD_REASSIGNED']);

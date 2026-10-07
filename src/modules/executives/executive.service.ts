@@ -1,6 +1,7 @@
 import { AppError, NotFoundError } from '../../utils/errors';
 import { hashPassword } from '../../utils/password';
 import { disconnectUser } from '../../realtime/socket';
+import { revokeUserDevices } from '../push/push.service';
 import { assertTeamAssignable } from '../teams/team.service';
 import * as teamRepo from '../teams/team.repository';
 import { toTeamDto } from '../teams/team.model';
@@ -90,13 +91,17 @@ function createUserService(role: ManagedRole) {
   async function changePassword(id: string, password: string): Promise<void> {
     await getUser(id);
     await repo.setPasswordHash(id, await hashPassword(password));
-    disconnectUser(id); // the old sessions are over: close their live sockets too
+    disconnectUser(id); // the old sessions are over: close their live sockets and stop waking their devices
+    await revokeUserDevices(id);
   }
 
   async function setStatus(id: string, isActive: boolean) {
     await getUser(id);
     await repo.setActive(id, isActive);
-    if (!isActive) disconnectUser(id);
+    if (!isActive) {
+      disconnectUser(id);
+      await revokeUserDevices(id);
+    }
     return reload(id);
   }
 
@@ -104,6 +109,7 @@ function createUserService(role: ManagedRole) {
     await getUser(id);
     await repo.softDelete(id);
     disconnectUser(id);
+    await revokeUserDevices(id);
     if (role === 'MANAGER') await repo.clearManagerFromTeams(id);
     const row = await repo.findById(id);
     return toExecutiveDto(row!);

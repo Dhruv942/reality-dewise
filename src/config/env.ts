@@ -20,11 +20,20 @@ const schema = z.object({
   SLA_WARNING_MINUTES: z.coerce.number().int().min(0).default(10),
   /** Comma-separated browser origins allowed to open a Socket.IO connection. Empty = same as CORS_ORIGINS. */
   SOCKET_CORS_ORIGIN: z.string().default(''),
+  /** Web Push (VAPID). Generate with: npx web-push generate-vapid-keys. All three set = push on; none = off. */
+  VAPID_PUBLIC_KEY: z.string().min(1).optional(),
+  VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+  /** A contact for the push services, e.g. "mailto:ops@example.com". */
+  VAPID_SUBJECT: z.string().min(1).optional(),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   LOGIN_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
 });
 
 const parsed = schema.safeParse(process.env);
+const vapidSet = ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'].filter((k) => process.env[k]);
+if (vapidSet.length > 0 && vapidSet.length < 3) {
+  throw new Error('Invalid environment configuration:\n  VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT must be set together');
+}
 if (!parsed.success) {
   // Only field names/messages are printed, never the values.
   const problems = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
@@ -35,4 +44,4 @@ const origins = (v: string) => v.split(',').map((o) => o.trim()).filter(Boolean)
 const corsOrigins = origins(parsed.data.CORS_ORIGINS);
 const socketOrigins = origins(parsed.data.SOCKET_CORS_ORIGIN);
 
-export const env = { ...parsed.data, corsOrigins, socketCorsOrigins: socketOrigins.length > 0 ? socketOrigins : corsOrigins };
+export const env = { ...parsed.data, pushEnabled: vapidSet.length === 3, corsOrigins, socketCorsOrigins: socketOrigins.length > 0 ? socketOrigins : corsOrigins };

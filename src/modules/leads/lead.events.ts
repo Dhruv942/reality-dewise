@@ -3,6 +3,7 @@ import { emitTo, rooms } from '../../realtime/socket';
 import { notify } from '../notifications/notification.service';
 import type { NotificationType } from '../notifications/notification.model';
 import * as repo from './lead.repository';
+import { toActivityDto, type ActivityRow } from './lead-activity.repository';
 import { toLeadDto, type LeadRow, type LeadStatus } from './lead.model';
 
 /**
@@ -62,10 +63,15 @@ async function notifyAll(
   }
 }
 
+/** Each timeline row that was just committed, live. Same audience as the lead event it belongs to. */
+const emitActivities = (to: string[], activities: ActivityRow[] = []) => {
+  for (const a of activities) emit('lead:activity-created', to, { leadId: a.lead_id, activity: toActivityDto(a) });
+};
+
 const label = (row: LeadRow) => `Lead #${row.lead_no} (${row.property_name})`;
 
 /** A lead was just created (and, when a property executive was available, already assigned by round-robin). */
-export const publishLeadCreated = (leadId: string) =>
+export const publishLeadCreated = (leadId: string, activities: ActivityRow[] = []) =>
   safely('lead:created', async () => {
     const row = await repo.findById(leadId);
     if (!row) return;
@@ -73,6 +79,7 @@ export const publishLeadCreated = (leadId: string) =>
     const managers = pending ? [] : await managersOf([row.executive_id]);
     emit('lead:created', [rooms.admin, ...(pending ? [rooms.managers] : [rooms.executive(row.executive_id!), ...managers.map(rooms.manager)])], { leadId, lead: leadPayload(row) });
 
+    if (pending) emitActivities([rooms.admin, rooms.managers], activities);
     if (pending) {
       // Nobody could take it: admins and managers have to act, so they get a notification.
       await notifyAll([...(await activeUserIds('ADMIN')), ...(await activeUserIds('MANAGER'))], {
@@ -83,9 +90,11 @@ export const publishLeadCreated = (leadId: string) =>
         dedupeKey: `lead-created:${leadId}`,
       });
     } else {
-      await publishAssignment({ leadId, previousExecutiveId: null, reason: 'CREATED' }, row);
+      await publishAssignment({ leadId, previousExecutiveId: null, reason: a_created(activities), activities }, row);
     }
   });
+
+const a_created = (activities: ActivityRow[]): AssignmentReason => (activities.some((x) => x.type === 'ASSIGNED' && x.actor_id) ? 'MANUAL' : 'CREATED');
 
 export type AssignmentReason = 'CREATED' | 'PENDING_ASSIGNED' | 'MANUAL' | 'SLA_TIMEOUT';
 
@@ -94,7 +103,7 @@ export type AssignmentReason = 'CREATED' | 'PENDING_ASSIGNED' | 'MANUAL' | 'SLA_
  * moved from another executive (by an admin/manager, or by the SLA).
  */
 export const publishAssignment = (
-  a: { leadId: string; previousExecutiveId: string | null; reason: AssignmentReason },
+  a: { leadId: string; previousExecutiveId: string | null; reason: AssignmentReason; activities?: ActivityRow[] },
   loaded?: LeadRow,
 ) =>
   safely('lead assignment', async () => {
@@ -107,6 +116,7 @@ export const publishAssignment = (
     const payload = { leadId: a.leadId, lead: leadPayload(row), executiveId, previousExecutiveId: previous, reason: a.reason };
 
     emit(event, [rooms.admin, rooms.executive(executiveId), ...managers.map(rooms.manager)], payload);
+    emitActivities([rooms.admin, rooms.executive(executiveId), ...managers.map(rooms.manager)], a.activities);
     const slim = { leadId: a.leadId, executiveId, previousExecutiveId: previous, reason: a.reason };
     if (previous) emit(event, [rooms.executive(previous)], slim);
     // A lead that was pending was visible to EVERY manager. Those not in charge of its new executive can no longer
@@ -148,7 +158,7 @@ export const publishAssignment = (
   });
 
 /** The SLA ran out and the existing sweep moved the lead. Emits sla-expired, then the reassignment. */
-export const publishSlaReassignment = (a: { leadId: string; previousExecutiveId: string; expiredAssignedAt: Date }) =>
+export const publishSlaReassignment = (a: { leadId: string; previousExecutiveId: string; expiredAssignedAt: Date; activities?: ActivityRow[] }) =>
   safely('lead:sla-expired', async () => {
     const row = await repo.findById(a.leadId);
     if (!row) return;
@@ -167,7 +177,7 @@ export const publishSlaReassignment = (a: { leadId: string; previousExecutiveId:
       entityId: a.leadId,
       dedupeKey: `sla-expired:${a.leadId}:${a.expiredAssignedAt.getTime()}`,
     });
-    await publishAssignment({ leadId: a.leadId, previousExecutiveId: a.previousExecutiveId, reason: 'SLA_TIMEOUT' }, row);
+    await publishAssignment({ leadId: a.leadId, previousExecutiveId: a.previousExecutiveId, reason: 'SLA_TIMEOUT', activities: a.activities }, row);
   });
 
 /** The assigned executive's SLA is about to run out. Once per assignment: a re-run of the job changes nothing. */
@@ -201,7 +211,7 @@ export async function publishSlaWarning(w: { leadId: string; executiveId: string
 }
 
 /** A person changed the status of a lead. `actorId` is who did it (the assigned executive is told if it was someone else). */
-export const publishStatusUpdated = (s: { leadId: string; previousStatus: LeadStatus; actorId?: string }) =>
+export const publishStatusUpdated = (s: { leadId: string; previousStatus: LeadStatus; actorId?: string; activities?: ActivityRow[] }) =>
   safely('lead:status-updated', async () => {
     const row = await repo.findById(s.leadId);
     if (!row || row.status === s.previousStatus) return;
@@ -212,6 +222,7 @@ export const publishStatusUpdated = (s: { leadId: string; previousStatus: LeadSt
       previousStatus: s.previousStatus,
       lead: leadPayload(row),
     });
+    emitActivities([rooms.admin, ...(row.executive_id ? [rooms.executive(row.executive_id)] : []), ...managers.map(rooms.manager)], s.activities);
     if (row.executive_id && row.executive_id !== s.actorId) {
       await notify({
         userId: row.executive_id,
