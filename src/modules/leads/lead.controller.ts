@@ -2,9 +2,11 @@ import type { Request, Response } from 'express';
 import { UnauthorizedError } from '../../utils/errors';
 import { parse } from '../../utils/validate';
 import * as service from './lead.service';
-import { idParam, listLeadsQuery } from './lead.validation';
+import { idParam, listLeadsQuery, tzQuery } from './lead.validation';
 
 const id = (req: Request) => parse(idParam, req.params).id;
+/** Optional `?tz=` (IANA zone) that decides where "today" is for follow-up states. */
+const tz = (req: Request) => parse(tzQuery, req.query).tz;
 const self = (req: Request): string => {
   if (!req.user) throw new UnauthorizedError();
   return req.user.id;
@@ -15,7 +17,7 @@ export const adminList = async (req: Request, res: Response) => {
   res.json(await service.listLeads({ ...parse(listLeadsQuery, req.query), viewerId: self(req) }));
 };
 export const adminGet = async (req: Request, res: Response) => {
-  res.json(await service.getLeadDetail(id(req), undefined, undefined, self(req)));
+  res.json(await service.getLeadDetail(id(req), undefined, undefined, self(req), tz(req)));
 };
 export const adminCreate = async (req: Request, res: Response) => {
   const { created, lead, notice } = await service.createLead(req.body, self(req));
@@ -39,7 +41,7 @@ export const myList = async (req: Request, res: Response) => {
   res.json(await service.listLeads({ ...q, executiveId: self(req), forExecutive: true, viewerId: self(req) }));
 };
 export const myGet = async (req: Request, res: Response) => {
-  res.json(await service.getLeadDetail(id(req), self(req), undefined, self(req)));
+  res.json(await service.getLeadDetail(id(req), self(req), undefined, self(req), tz(req)));
 };
 export const mySummary = async (req: Request, res: Response) => {
   res.json(await service.executiveSummary(self(req)));
@@ -59,7 +61,7 @@ export const managerList = async (req: Request, res: Response) => {
   res.json(await service.listLeads({ ...parse(listLeadsQuery, req.query), managerId: self(req), viewerId: self(req) }));
 };
 export const managerGet = async (req: Request, res: Response) => {
-  res.json(await service.getLeadDetail(id(req), undefined, self(req), self(req)));
+  res.json(await service.getLeadDetail(id(req), undefined, self(req), self(req), tz(req)));
 };
 
 // ---- any role, in their own portal: mark / unmark a lead as important FOR THE LOGGED-IN USER ----
@@ -72,4 +74,12 @@ export const markImportant = async (req: Request, res: Response) => {
 };
 export const unmarkImportant = async (req: Request, res: Response) => {
   res.json(await service.setImportant(id(req), actor(req), false));
+};
+
+// ---- any role, in their own portal: set / change / clear the follow-up of a lead they can see ----
+export const setFollowUp = async (req: Request, res: Response) => {
+  res.json(await service.setFollowUp(id(req), actor(req), req.body, tz(req)));
+};
+export const clearFollowUp = async (req: Request, res: Response) => {
+  res.json(await service.setFollowUp(id(req), actor(req), { followUpAt: null }, tz(req)));
 };

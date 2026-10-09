@@ -78,12 +78,14 @@ const sections = [
   ]],
   ['4. Enquiry / leads (admin)', [
     ['Send enquiry (client + property + lead + round-robin)', 'POST', '/admin/leads', [F('name'), F('mobile'), F('email'), F('propertyName'), F('source', SOURCES), F('requirement'), F('budget', T, 'number'), F('message')]],
-    ['List all leads (?status=PENDING_ASSIGNMENT for unassigned)', 'GET', '/admin/leads', []],
+    ['List all leads (?status=PENDING_ASSIGNMENT for unassigned; ?followUp=overdue|today|upcoming|none&tz=Asia/Kolkata)', 'GET', '/admin/leads', []],
     ['Lead details + client history', 'GET', '/admin/leads/{id}', [F('id', T, 'path id')]],
     ['Update lead status', 'PATCH', '/admin/leads/{id}/status', [F('id', T, 'path id'), F('status', STATUSES)]],
     ['Assign / reassign lead to a sales executive', 'PATCH', '/admin/leads/{id}/assign', [F('id', T, 'path id'), F('executiveId', T, 'id')]],
     ['Mark lead important (for me)', 'POST', '/admin/leads/{id}/important', [F('id', T, 'path id')]],
     ['Unmark lead important (for me)', 'DELETE', '/admin/leads/{id}/important', [F('id', T, 'path id')]],
+    ['Set / change follow-up (your local time; empty followUpAt clears)', 'PUT', '/admin/leads/{id}/follow-up', [F('id', T, 'path id'), F('followUpAt', T, 'datetime'), F('followUpNote')]],
+    ['Clear follow-up', 'DELETE', '/admin/leads/{id}/follow-up', [F('id', T, 'path id')]],
     ['List clients', 'GET', '/admin/customers', []],
   ]],
   ['5. Manager view (login as manager first)', [
@@ -94,6 +96,8 @@ const sections = [
     ['Assign / reassign to an executive of my teams', 'PATCH', '/manager/leads/{id}/assign', [F('id', T, 'path id'), F('executiveId', T, 'id')]],
     ['Mark lead important (for me)', 'POST', '/manager/leads/{id}/important', [F('id', T, 'path id')]],
     ['Unmark lead important (for me)', 'DELETE', '/manager/leads/{id}/important', [F('id', T, 'path id')]],
+    ['Set / change follow-up (your local time; empty followUpAt clears)', 'PUT', '/manager/leads/{id}/follow-up', [F('id', T, 'path id'), F('followUpAt', T, 'datetime'), F('followUpNote')]],
+    ['Clear follow-up', 'DELETE', '/manager/leads/{id}/follow-up', [F('id', T, 'path id')]],
   ]],
   ['Settings (admin): lead assignment rule', [
     ['Get assignment rule', 'GET', '/admin/settings/assignment-rule', []],
@@ -108,6 +112,8 @@ const sections = [
     ['Update my lead status', 'PATCH', '/executive/leads/{id}/status', [F('id', T, 'path id'), F('status', STATUSES)]],
     ['Mark lead important (for me)', 'POST', '/executive/leads/{id}/important', [F('id', T, 'path id')]],
     ['Unmark lead important (for me)', 'DELETE', '/executive/leads/{id}/important', [F('id', T, 'path id')]],
+    ['Set / change follow-up (your local time; empty followUpAt clears)', 'PUT', '/executive/leads/{id}/follow-up', [F('id', T, 'path id'), F('followUpAt', T, 'datetime'), F('followUpNote')]],
+    ['Clear follow-up', 'DELETE', '/executive/leads/{id}/follow-up', [F('id', T, 'path id')]],
   ]],
 ];
 
@@ -137,9 +143,10 @@ async function run(method, pathTpl, fields, kind, values) {
   const pathVars = fields.filter((f) => f.extra.includes('path'));
   for (const f of fields) {
     const v = values[f.name];
+    if (f.extra.includes('datetime') && v === '') { body[f.name] = null; continue; } // empty clears the follow-up
     if (f.extra.includes('path')) path = path.replace(`{${f.name}}`, encodeURIComponent(v));
     else if (v !== '' && v !== undefined) {
-      body[f.name] = f.kind === B ? v === 'true' : f.extra.includes('number') ? Number(v) : f.extra.includes('list') ? v.split(',').map((x) => x.trim()).filter(Boolean) : v;
+      body[f.name] = f.extra.includes('datetime') ? new Date(v).toISOString() : f.kind === B ? v === 'true' : f.extra.includes('number') ? Number(v) : f.extra.includes('list') ? v.split(',').map((x) => x.trim()).filter(Boolean) : v;
     }
   }
   const headers = {};
@@ -174,7 +181,7 @@ for (const [title, forms] of sections) {
       let input;
       if (Array.isArray(f.kind)) input = el('select', {}, ...f.kind.map((o) => el('option', { value: o }, o)));
       else if (f.kind === B) input = el('select', {}, el('option', { value: 'true' }, 'true'), el('option', { value: 'false' }, 'false'));
-      else { input = el('input', { type: f.name.toLowerCase().includes('password') ? 'password' : 'text', autocomplete: 'off' }); if (f.extra.includes('id')) input.setAttribute('list', 'ids'); }
+      else { input = el('input', { type: f.name.toLowerCase().includes('password') ? 'password' : f.extra.includes('datetime') ? 'datetime-local' : 'text', autocomplete: 'off' }); if (f.extra.includes('id')) input.setAttribute('list', 'ids'); }
       inputs[f.name] = input;
       form.append(el('label', {}, f.name, input));
     }

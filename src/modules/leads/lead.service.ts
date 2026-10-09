@@ -1,5 +1,5 @@
 import { withTransaction, type Db } from '../../database/transaction';
-import { AppError, ForbiddenError, NotFoundError } from '../../utils/errors';
+import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors';
 import * as executiveRepo from '../executives/executive.repository';
 import * as assignmentRepo from '../assignment/assignment.repository';
 import * as settingsRepo from '../settings/settings.repository';
@@ -154,12 +154,12 @@ export async function assignPendingLeads(propertyId: string, tx: Db, assignedIds
  * One lead plus the client's other enquiries (their history: property, requirement, budget, date, executive,
  * status, notes). With `ownerId` (executive) opening the lead also clears its "New" indicator.
  */
-export async function getLeadDetail(id: string, ownerId?: string, managerId?: string, viewerId?: string) {
+export async function getLeadDetail(id: string, ownerId?: string, managerId?: string, viewerId?: string, tz?: string) {
   if (!(await repo.findById(id, ownerId, managerId))) throw new NotFoundError('Lead not found');
   if (ownerId) await repo.markSeen(id, ownerId);
-  const lead = toLeadDto((await repo.findById(id, ownerId, managerId, viewerId))!);
+  const lead = toLeadDto((await repo.findById(id, ownerId, managerId, viewerId))!, tz);
   const history = (await repo.listForCustomer(lead.customer.id, id, 50, viewerId)).map((r) => {
-    const { customer: _c, ...entry } = toLeadDto(r);
+    const { customer: _c, ...entry } = toLeadDto(r, tz);
     return entry;
   });
   const activity = (await activityRepo.listForLead(id)).map(activityRepo.toActivityDto);
@@ -176,13 +176,13 @@ export async function executiveSummary(executiveId: string) {
   };
 }
 
-export const listLeads = async (f: repo.LeadFilters) => (await repo.list(f)).map(toLeadDto);
+export const listLeads = async (f: repo.LeadFilters) => (await repo.list(f)).map((r) => toLeadDto(r, f.tz));
 
 /** Pass `ownerId` for executives: they can only see their own leads. */
-export async function getLead(id: string, ownerId?: string, viewerId?: string) {
+export async function getLead(id: string, ownerId?: string, viewerId?: string, tz?: string) {
   const lead = await repo.findById(id, ownerId, undefined, viewerId);
   if (!lead) throw new NotFoundError('Lead not found');
-  return toLeadDto(lead);
+  return toLeadDto(lead, tz);
 }
 
 export async function updateStatus(
@@ -250,6 +250,30 @@ export async function setImportant(id: string, actor: { id: string; role: UserRo
   if (important) await repo.markImportant(actor.id, id);
   else await repo.unmarkImportant(actor.id, id);
   return toLeadDto((await repo.findById(id, ownerId, managerId, actor.id))!);
+}
+
+/**
+ * Sets, changes or (followUpAt null) clears the follow-up of a lead the actor can see through their own portal:
+ * admin any lead, manager their scope, sales user their own leads (otherwise 404). It only writes the follow-up
+ * fields: assignment, status and the SLA are never touched. A new or changed time must be in the future; keeping an
+ * already-overdue time (e.g. to edit its note) is allowed.
+ */
+export async function setFollowUp(
+  id: string,
+  actor: { id: string; role: UserRole },
+  input: { followUpAt: string | null; followUpNote?: string | null },
+  tz?: string,
+) {
+  const ownerId = actor.role === 'SALES' ? actor.id : undefined;
+  const managerId = actor.role === 'MANAGER' ? actor.id : undefined;
+  const lead = await repo.findById(id, ownerId, managerId);
+  if (!lead) throw new NotFoundError('Lead not found');
+  const at = input.followUpAt === null ? null : new Date(input.followUpAt);
+  if (at && at.getTime() <= Date.now() && at.getTime() !== lead.follow_up_at?.getTime()) {
+    throw new ValidationError([{ field: 'followUpAt', message: 'Follow-up must be in the future' }]);
+  }
+  await repo.setFollowUp(id, actor.id, at, input.followUpNote || null);
+  return toLeadDto((await repo.findById(id, ownerId, managerId, actor.id))!, tz);
 }
 
 /**

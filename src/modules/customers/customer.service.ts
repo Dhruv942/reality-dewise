@@ -12,7 +12,7 @@ export async function getCustomerDetails(id: string, viewerId?: string) {
   const customer = await repo.findById(id);
   if (!customer) throw new NotFoundError('Customer not found');
   const leads = await leadRepo.list({ customerId: id, limit: 200, offset: 0, viewerId });
-  return { ...toCustomerDto(customer), leads: leads.map(toLeadDto).map(({ customer: _c, ...rest }) => rest) };
+  return { ...toCustomerDto(customer), leads: leads.map((l) => toLeadDto(l)).map(({ customer: _c, ...rest }) => rest) };
 }
 
 export async function updateCustomer(id: string, input: { name?: string; email?: string | null }) {

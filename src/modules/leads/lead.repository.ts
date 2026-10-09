@@ -13,6 +13,7 @@ const IMPORTANT = (viewer: string) =>
 
 const select = (viewer: string) => `
   SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.message, l.requirement, l.enquiry_type, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.source, l.created_at, l.updated_at,
+         l.follow_up_at, l.follow_up_note, l.follow_up_updated_by, fu.name AS follow_up_updated_by_name, l.follow_up_updated_at,
          c.id AS customer_id, c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email,
          p.id AS property_id, p.name AS property_name, p.location AS property_location,
          u.id AS executive_id, u.name AS executive_name,
@@ -20,7 +21,8 @@ const select = (viewer: string) => `
   FROM leads l
   JOIN customers c ON c.id = l.customer_id
   JOIN properties p ON p.id = l.property_id
-  LEFT JOIN users u ON u.id = l.assigned_executive_id`;
+  LEFT JOIN users u ON u.id = l.assigned_executive_id
+  LEFT JOIN users fu ON fu.id = l.follow_up_updated_by`;
 
 /**
  * A manager sees the leads of the sales users in the teams they lead, plus leads nobody has been assigned yet
@@ -73,6 +75,9 @@ export interface LeadFilters {
   viewerId?: string;
   /** Only leads the viewer marked important (true) or did not (false). */
   important?: boolean;
+  /** Follow-up bucket; `tz` decides where "today" starts and ends (default UTC). */
+  followUp?: 'overdue' | 'today' | 'upcoming' | 'none';
+  tz?: string;
   limit: number;
   offset: number;
 }
@@ -90,6 +95,13 @@ export async function list(f: LeadFilters): Promise<LeadRow[]> {
   if (f.isNew) where.push('(l.assigned_executive_id IS NOT NULL AND l.seen_at IS NULL)');
   // ms precision: the API returns assignedAt in ms, the column holds microseconds, so compare like with like.
   if (f.assignedSince) where.push(`date_trunc('milliseconds', l.assigned_at) > $${params.push(f.assignedSince)}::timestamptz`);
+  if (f.followUp === 'none') where.push('l.follow_up_at IS NULL');
+  else if (f.followUp === 'overdue') where.push('l.follow_up_at <= now()');
+  else if (f.followUp) {
+    const tz = `$${params.push(f.tz ?? 'UTC')}::text`;
+    const endOfToday = `((date_trunc('day', now() AT TIME ZONE ${tz}) + interval '1 day') AT TIME ZONE ${tz})`;
+    where.push(f.followUp === 'today' ? `l.follow_up_at > now() AND l.follow_up_at < ${endOfToday}` : `l.follow_up_at >= ${endOfToday}`);
+  }
   if (f.search) {
     const s = `$${params.push(`%${escapeLike(f.search)}%`)}`;
     where.push(`(c.name ILIKE ${s} OR c.mobile ILIKE ${s} OR c.email ILIKE ${s} OR p.name ILIKE ${s})`);
@@ -280,3 +292,13 @@ export async function findSlaWarnable(
   );
   return rows;
 }
+
+/**
+ * Sets (or, with `at` null, clears) the follow-up. Writes only the four follow-up columns, so assignment, status and
+ * the SLA clock are untouched. Clearing also drops the note and keeps who/when as the record of the change.
+ */
+export const setFollowUp = (id: string, userId: string, at: Date | null, note: string | null) =>
+  pool.query(
+    'UPDATE leads SET follow_up_at = $2, follow_up_note = $3, follow_up_updated_by = $4, follow_up_updated_at = now() WHERE id = $1',
+    [id, at, at ? note : null, userId],
+  );

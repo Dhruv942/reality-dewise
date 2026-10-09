@@ -35,9 +35,39 @@ export interface LeadRow {
   executive_name: string | null;
   /** The admin's SLA setting at the time of the query (minutes). */
   sla_minutes: number;
+  follow_up_at: Date | null;
+  follow_up_note: string | null;
+  follow_up_updated_by: string | null;
+  follow_up_updated_by_name: string | null;
+  follow_up_updated_at: Date | null;
 }
 
-export const toLeadDto = (l: LeadRow) => ({
+export const FOLLOW_UP_STATES = ['OVERDUE', 'TODAY', 'UPCOMING'] as const;
+export type FollowUpState = (typeof FOLLOW_UP_STATES)[number];
+
+/** The calendar day (YYYY-MM-DD) of `d` in the IANA zone `tz`. */
+const dayIn = (d: Date, tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+
+/**
+ * Where a follow-up stands: OVERDUE (already past), TODAY (still to come today in `tz`) or UPCOMING (a later day).
+ * Informational only: it never changes assignment or the SLA.
+ */
+export function followUpState(at: Date, now: Date, tz = 'UTC'): FollowUpState {
+  if (at.getTime() <= now.getTime()) return 'OVERDUE';
+  return dayIn(at, tz) === dayIn(now, tz) ? 'TODAY' : 'UPCOMING';
+}
+
+/** Whether `tz` is an IANA timezone name this runtime knows. */
+export const isValidTimeZone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const toLeadDto = (l: LeadRow, tz = 'UTC') => ({
   id: l.id,
   leadNo: Number(l.lead_no),
   // Per user: true only if the logged-in user marked this lead important. Never reflects anyone else's flag.
@@ -67,6 +97,16 @@ export const toLeadDto = (l: LeadRow) => ({
     l.status === 'INCOMING' && l.executive_id && l.assigned_at
       ? { minutes: l.sla_minutes, deadline: new Date(l.assigned_at.getTime() + l.sla_minutes * 60_000), now: new Date() }
       : null,
+  // null when nothing is scheduled. `state` is relative to now, with "today" in the requested `tz` (default UTC).
+  followUp: l.follow_up_at
+    ? {
+        at: l.follow_up_at,
+        note: l.follow_up_note,
+        state: followUpState(l.follow_up_at, new Date(), tz),
+        updatedBy: l.follow_up_updated_by ? { id: l.follow_up_updated_by, name: l.follow_up_updated_by_name } : null,
+        updatedAt: l.follow_up_updated_at,
+      }
+    : null,
   createdAt: l.created_at,
   updatedAt: l.updated_at,
 });
