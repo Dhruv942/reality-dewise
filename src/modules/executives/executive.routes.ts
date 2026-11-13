@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { validateBody } from '../../middleware/validate';
 import { executiveController as c } from './executive.controller';
 import {
-  assignTeamSchema,
+  assignManagerSchema,
   createExecutiveSchema,
   passwordSchema,
   statusSchema,
@@ -18,5 +18,5 @@ executiveRouter.patch('/:id', validateBody(updateExecutiveSchema), c.update);
 executiveRouter.delete('/:id', c.remove);
 executiveRouter.patch('/:id/password', validateBody(passwordSchema), c.changePassword);
 executiveRouter.patch('/:id/status', validateBody(statusSchema), c.setStatus);
-executiveRouter.patch('/:executiveId/team', validateBody(assignTeamSchema), c.assignTeam);
-executiveRouter.delete('/:executiveId/team', c.removeFromTeam);
+executiveRouter.patch('/:executiveId/manager', validateBody(assignManagerSchema), c.assignManager);
+executiveRouter.delete('/:executiveId/manager', c.removeManager);

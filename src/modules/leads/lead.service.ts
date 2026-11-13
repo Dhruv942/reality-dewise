@@ -13,9 +13,9 @@ import { propertyAssignmentService } from '../assignment/assignment.service';
 import * as repo from './lead.repository';
 import * as activityRepo from './lead-activity.repository';
 import type { ActivityRow } from './lead-activity.repository';
-import { recordAssigned, recordReceived, recordStatus, recordTimeout } from './lead-activity.service';
+import { recordAssigned, recordReceived, recordStatus, recordTimeout, recordTransferred } from './lead-activity.service';
 import { publishAssignment, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
-import { toLeadDto, type EnquiryType, type LeadStatus } from './lead.model';
+import { toLeadDto, type EnquiryType, type LeadStatus, type StatusReasonCode } from './lead.model';
 
 export interface NewLeadInput {
   name: string;
@@ -37,7 +37,7 @@ export interface NewLeadInput {
 }
 
 const pendingNotice = (propertyName: string) =>
-  `No executive/team is assigned to ${propertyName}. Please assign an executive/team before processing this lead.`;
+  `No executive is assigned to ${propertyName}. Please assign an executive before processing this lead.`;
 
 /**
  * The single entry point for creating a lead: today the admin API, later the 99acres/Magicbricks webhook.
@@ -116,7 +116,7 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
 
 /**
  * Throws unless `executiveId` is an active sales user the actor may give leads to: any of them for an admin,
- * only those in the teams they lead for a manager (`managerId`).
+ * only their own executives (users.manager_id = the manager) for a manager (`managerId`).
  */
 export async function assertAssignable(executiveId: string, managerId?: string): Promise<void> {
   const target = await executiveRepo.findById(executiveId);
@@ -124,8 +124,7 @@ export async function assertAssignable(executiveId: string, managerId?: string):
   if (target.role !== 'SALES') throw new AppError(400, 'Leads can only be assigned to sales executives or executive managers');
   if (!target.is_active) throw new AppError(409, 'Executive is inactive');
   if (managerId) {
-    const { rowCount } = await pool.query('SELECT 1 FROM teams WHERE id = $1 AND manager_id = $2', [target.team_id, managerId]);
-    if (!rowCount) throw new ForbiddenError('You can only assign leads to executives in the teams you manage');
+    if (target.manager_id !== managerId) throw new ForbiddenError('You can only assign leads to your own executives');
   }
 }
 
@@ -190,6 +189,7 @@ export async function updateStatus(
   status: Exclude<LeadStatus, 'PENDING_ASSIGNMENT'>,
   ownerId?: string,
   viewerId?: string,
+  statusReason?: { code: StatusReasonCode; other: string | null },
 ) {
   // One transaction with the row locked: the SLA sweep skips a locked lead, and an executive whose lead the sweep
   // already moved finds it is no longer theirs. So a status change and a timeout reassignment can never both win.
@@ -199,8 +199,8 @@ export async function updateStatus(
     if (current.status === 'PENDING_ASSIGNMENT') {
       throw new AppError(409, 'This lead is pending assignment. Assign executives to its property first.');
     }
-    await repo.setStatusIn(tx, id, status);
-    const written = await recordStatus(tx, { leadId: id, status, actorId: viewerId, executiveId: current.executive_id });
+    await repo.setStatusIn(tx, id, status, statusReason?.code ?? null, statusReason?.other ?? null);
+    const written = await recordStatus(tx, { leadId: id, status, actorId: viewerId, executiveId: current.executive_id, reason: statusReason?.code, otherReason: statusReason?.other });
     return { previousStatus: current.status, activity: written };
   });
   await publishStatusUpdated({ leadId: id, previousStatus, actorId: viewerId, activities: [activity] });
@@ -210,8 +210,7 @@ export async function updateStatus(
 /**
  * Admin or manager gives a lead to a specific sales executive / executive manager (same role, same rules).
  *   ADMIN   : any lead, any active sales user.
- *   MANAGER : leads in their scope (their teams' leads or unassigned ones), only to sales users of the teams
- *             they lead.
+ *   MANAGER : leads in their scope (their executives' leads or unassigned ones), only to their own executives.
  * Works for a pending lead (first assignment) and for reassignment. The round-robin pointer is not touched,
  * and the assignment history records who did it.
  */
@@ -236,6 +235,40 @@ export async function assignLead(id: string, executiveId: string, actor: { id: s
   });
   await publishAssignment({ leadId: id, previousExecutiveId: lead.executive_id, reason: 'MANUAL', activities });
   return getLead(id, undefined, actor.id);
+}
+
+export async function transferLead(id: string, targetExecutiveId: string, actor: { id: string; role: 'ADMIN' | 'MANAGER'; reason?: string }) {
+  const managerId = actor.role === 'MANAGER' ? actor.id : undefined;
+  const moved = await withTransaction(async (tx) => {
+    const lead = await repo.lockForTransfer(tx, id, managerId);
+    if (!lead) throw new NotFoundError('Lead not found');
+    if (!lead.executive_id) throw new AppError(409, 'A pending lead cannot be transferred');
+    if (lead.executive_id === targetExecutiveId) throw new AppError(409, 'Lead is already assigned to this executive');
+
+    const target = (await tx.query<{ id: string; role: string; is_active: boolean; deleted_at: Date | null; manager_id: string | null }>(
+      'SELECT id, role, is_active, deleted_at, manager_id FROM users WHERE id = $1 FOR SHARE',
+      [targetExecutiveId],
+    )).rows[0];
+    if (!target || target.deleted_at || target.role !== 'SALES') throw new AppError(400, 'Executive not found');
+    if (!target.is_active) throw new AppError(409, 'Executive is inactive');
+    if (managerId && target.manager_id !== managerId) throw new ForbiddenError('You can only transfer leads to your own executives');
+
+    await repo.assignTo(tx, id, targetExecutiveId);
+    await assignmentRepo.insertHistory(tx, {
+      propertyId: lead.property_id,
+      executiveId: targetExecutiveId,
+      leadId: id,
+      method: 'TRANSFER',
+      assignedById: actor.id,
+      reason: actor.reason ?? null,
+    });
+    return {
+      previousExecutiveId: lead.executive_id,
+      activities: await recordTransferred(tx, { leadId: id, previousExecutiveId: lead.executive_id, executiveId: targetExecutiveId, actorId: actor.id, reason: actor.reason }),
+    };
+  });
+  await publishAssignment({ leadId: id, previousExecutiveId: moved.previousExecutiveId, reason: 'TRANSFER', activities: moved.activities });
+  return getLead(id, undefined, actor.role === 'MANAGER' ? actor.id : undefined, actor.id);
 }
 
 /**

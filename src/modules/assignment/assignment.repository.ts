@@ -63,12 +63,12 @@ export async function listRotation(db: Db, propertyId: string, lastId: string | 
 
 export async function insertHistory(
   db: Db,
-  h: { propertyId: string; executiveId: string; leadId: string; method?: AssignmentMethod; assignedById?: string },
+  h: { propertyId: string; executiveId: string; leadId: string; method?: AssignmentMethod; assignedById?: string; reason?: string | null },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO property_assignment_history (property_id, executive_id, lead_id, method, assigned_by_id)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [h.propertyId, h.executiveId, h.leadId, h.method ?? 'ROUND_ROBIN', h.assignedById ?? null],
+    `INSERT INTO property_assignment_history (property_id, executive_id, lead_id, method, assigned_by_id, reason)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [h.propertyId, h.executiveId, h.leadId, h.method ?? 'ROUND_ROBIN', h.assignedById ?? null, h.reason ?? null],
   );
   return rows[0].id;
 }

@@ -23,7 +23,7 @@ export const adminCreate = async (req: Request, res: Response) => {
   const { created, lead, notice } = await service.createLead(req.body, self(req));
   res.status(created ? 201 : 200).json(notice ? { ...lead, notice } : lead);
 };
-// ---- manager: add a lead and give it to an executive of their teams in one step ----
+// ---- manager: add a lead and give it to one of their executives in one step ----
 export const managerCreate = async (req: Request, res: Response) => {
   const { executiveId, ...input } = req.body;
   const managerId = self(req);
@@ -32,7 +32,7 @@ export const managerCreate = async (req: Request, res: Response) => {
   res.status(created ? 201 : 200).json(notice ? { ...lead, notice } : lead);
 };
 export const adminSetStatus = async (req: Request, res: Response) => {
-  res.json(await service.updateStatus(id(req), req.body.status, undefined, self(req)));
+  res.json(await service.updateStatus(id(req), req.body.status, undefined, self(req), req.body.reason ? { code: req.body.reason, other: req.body.otherReason ?? null } : undefined));
 };
 
 // ---- executive: only own leads (ownerId is always the token's user, never client-supplied) ----
@@ -47,7 +47,7 @@ export const mySummary = async (req: Request, res: Response) => {
   res.json(await service.executiveSummary(self(req)));
 };
 export const mySetStatus = async (req: Request, res: Response) => {
-  res.json(await service.updateStatus(id(req), req.body.status, self(req), self(req)));
+  res.json(await service.updateStatus(id(req), req.body.status, self(req), self(req), req.body.reason ? { code: req.body.reason, other: req.body.otherReason ?? null } : undefined));
 };
 
 // ---- admin + manager: give a lead to a sales executive (the actor comes from the token) ----
@@ -55,8 +55,12 @@ export const assign = async (req: Request, res: Response) => {
   if (!req.user || (req.user.role !== 'ADMIN' && req.user.role !== 'MANAGER')) throw new UnauthorizedError();
   res.json(await service.assignLead(id(req), req.body.executiveId, { id: req.user.id, role: req.user.role }));
 };
+export const transfer = async (req: Request, res: Response) => {
+  if (!req.user || (req.user.role !== 'ADMIN' && req.user.role !== 'MANAGER')) throw new UnauthorizedError();
+  res.json(await service.transferLead(id(req), req.body.targetExecutiveId, { id: req.user.id, role: req.user.role, reason: req.body.reason }));
+};
 
-// ---- manager: the leads of the teams they lead, plus unassigned leads ----
+// ---- manager: the leads of their executives, plus unassigned leads ----
 export const managerList = async (req: Request, res: Response) => {
   res.json(await service.listLeads({ ...parse(listLeadsQuery, req.query), managerId: self(req), viewerId: self(req) }));
 };

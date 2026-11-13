@@ -115,19 +115,18 @@ describe('CORS + security headers', () => {
 
 describe('NUL bytes', () => {
   it('rejected with 400 in bodies and query strings, nothing stored', async () => {
-    const r = await t.call('/admin/teams', 'POST', { name: 'bad\u0000name' });
+    const r = await t.call('/admin/managers', 'POST', { name: 'bad\u0000name', email: 'nul@test.com', username: 'nul.mgr', password: 'TempPass123' });
     assert.equal(r.status, 400);
     assert.equal(r.body.message, 'Validation failed');
+    assert.equal((await t.call('/admin/managers')).body.length, 0);
     assert.equal((await t.call('/admin/executives?search=a%00b')).status, 400);
-    assert.equal((await t.call('/admin/teams')).body.length, 0);
     assert.equal((await t.call('/auth/admin/login', 'POST', { email: 'a@b.com', password: 'x\u0000y' })).status, 400);
   });
 });
 
 describe('password change ends old sessions', () => {
   it('token issued before the change is rejected; tokens after it work', async () => {
-    const team = await t.team('Sess');
-    const e = await t.exec('sess.exec', team.id);
+    const e = await t.exec('sess.exec');
     const before = await t.login('executive', 'sess.exec@test.com', 'TempPass123');
     const meBefore = t.asToken(before);
     assert.equal((await meBefore('/auth/me')).status, 200);

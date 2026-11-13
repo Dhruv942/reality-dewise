@@ -6,7 +6,6 @@ const UNIQUE_MESSAGES: Record<string, string> = {
   users_username_key: 'Username is already in use',
   users_phone_key: 'Phone number is already in use',
   properties_name_key_key: 'A property with this name already exists',
-  teams_name_lower_key: 'A team with this name already exists',
 };
 
 export const notFoundHandler: RequestHandler = (_req, _res, next) => next(new NotFoundError('Route not found'));

@@ -21,11 +21,10 @@ after(() => t.close());
 
 describe('round-robin over the executives picked for the property', () => {
   it('Amit, Rahul, Priya, Amit, Rahul ...; executives not on the list never receive leads', async () => {
-    const team = await t.team('Team A');
-    const amit = await t.exec('amit', team.id);
-    const rahul = await t.exec('rahul', team.id);
-    const priya = await t.exec('priya', team.id);
-    const bystander = await t.exec('bystander', team.id); // same team, NOT picked
+    const amit = await t.exec('amit');
+    const rahul = await t.exec('rahul');
+    const priya = await t.exec('priya');
+    const bystander = await t.exec('bystander'); // not picked for the property
     const p = await newProperty([amit.id, rahul.id, priya.id]);
     assert.deepEqual(await rotation(p.id, 5), [amit.id, rahul.id, priya.id, amit.id, rahul.id]);
     assert.equal((await pool.query('SELECT count(*)::int n FROM property_assignment_history WHERE executive_id=$1', [bystander.id])).rows[0].n, 0);

@@ -1,5 +1,5 @@
 import { withTransaction } from '../../database/transaction';
-import { AppError, NotFoundError } from '../../utils/errors';
+import { AppError, ForbiddenError, NotFoundError } from '../../utils/errors';
 import * as executiveRepo from '../executives/executive.repository';
 import * as assignmentRepo from '../assignment/assignment.repository';
 import { toHistoryDto } from '../assignment/assignment.model';
@@ -57,18 +57,38 @@ async function assertAssignable(executiveIds: string[]): Promise<void> {
   }
 }
 
+/** A manager may only put their own executives (users.manager_id = the manager) on a property. */
+async function assertManagedBy(executiveIds: string[], managerId: string): Promise<void> {
+  for (const eid of executiveIds) {
+    const e = await executiveRepo.findById(eid);
+    if (e && !e.deleted_at && e.role === 'SALES' && e.manager_id !== managerId) {
+      throw new ForbiddenError('You can only assign your own executives to a property');
+    }
+  }
+}
+
 /**
  * Sets the hand-picked executive list for the property (full replace; [] un-assigns it).
  * Leads that were waiting as PENDING_ASSIGNMENT are assigned straight away, oldest first, through
  * the same round-robin. The list change and those assignments commit together.
+ *
+ * With `managerId` (a manager editing) the list is only THEIR part: `executiveIds` must all be their own
+ * executives, and the executives of the property that report to someone else stay exactly as they are, so a
+ * manager can never remove or replace another manager's (or an unmanaged) executive.
  */
-export async function setExecutives(id: string, executiveIds: string[]) {
+export async function setExecutives(id: string, executiveIds: string[], managerId?: string) {
   await getProperty(id);
   await assertAssignable(executiveIds);
+  if (managerId) await assertManagedBy(executiveIds, managerId);
   const assignedIds: string[] = [];
   const activities: ActivityRow[] = [];
   const assignedPendingLeads = await withTransaction(async (tx) => {
-    await repo.replaceExecutives(tx, id, executiveIds);
+    let finalIds = executiveIds;
+    if (managerId) {
+      await repo.lockForUpdate(tx, id);
+      finalIds = [...new Set([...(await repo.listExecutiveIdsNotManagedBy(tx, id, managerId)), ...executiveIds])];
+    }
+    await repo.replaceExecutives(tx, id, finalIds);
     return assignPendingLeads(id, tx, assignedIds, activities);
   });
   // Committed: tell the newly assigned executives (and admin/managers) about each lead.

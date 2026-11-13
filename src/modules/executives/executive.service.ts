@@ -2,9 +2,6 @@ import { AppError, NotFoundError } from '../../utils/errors';
 import { hashPassword } from '../../utils/password';
 import { disconnectUser } from '../../realtime/socket';
 import { revokeUserDevices } from '../push/push.service';
-import { assertTeamAssignable } from '../teams/team.service';
-import * as teamRepo from '../teams/team.repository';
-import { toTeamDto } from '../teams/team.model';
 import type { UserDesignation } from '../users/user.model';
 import * as repo from './executive.repository';
 import { toExecutiveDto, type ExecutiveRow } from './executive.model';
@@ -14,8 +11,8 @@ type ManagedRole = 'SALES' | 'MANAGER';
 /**
  * One implementation of "admin manages user accounts" for both account types, so sales users and managers
  * share the same rules (unique email/username, soft delete, password change, activate/deactivate).
- *   SALES   : sales executives and executive managers (designation differs, permissions do not); can join a team.
- *   MANAGER : leads teams (a team points at its manager); is never a team member.
+ *   SALES   : sales executives and executive managers (designation differs, permissions do not); each can report to one manager.
+ *   MANAGER : looks after the sales users that point at them (users.manager_id); never has a manager themselves.
  */
 function createUserService(role: ManagedRole) {
   const label = role === 'MANAGER' ? 'Manager' : 'Executive';
@@ -30,21 +27,22 @@ function createUserService(role: ManagedRole) {
 
   const reload = async (id: string) => toExecutiveDto(await getUser(id));
 
-  /** Assignment rules: executive active + team exists + team active. */
-  async function assertCanJoinTeam(exec: ExecutiveRow, teamId: string): Promise<void> {
-    if (!exec.is_active) throw new AppError(409, 'Executive is inactive');
-    await assertTeamAssignable(teamId);
+  /** The manager must be a live, active MANAGER account. */
+  async function assertValidManager(managerId: string): Promise<void> {
+    const m = await repo.findById(managerId);
+    if (!m || m.deleted_at) throw new AppError(400, 'Manager not found');
+    if (m.role !== 'MANAGER') throw new AppError(400, 'User is not a manager');
+    if (!m.is_active) throw new AppError(409, 'Manager is inactive');
   }
 
-  const list = async (f: { teamId?: string; isActive?: boolean; search?: string; managerId?: string }) =>
+  const list = async (f: { isActive?: boolean; search?: string; managerId?: string }) =>
     (await repo.list({ ...f, role })).map(toExecutiveDto);
 
-  /** A manager's detail also lists the teams they lead. */
+  /** A manager's detail also lists the sales users that report to them. */
   async function details(id: string) {
     const dto = toExecutiveDto(await getUser(id));
     if (role !== 'MANAGER') return dto;
-    const teams = await teamRepo.list({ managerId: id });
-    return { ...dto, managedTeams: teams.map(toTeamDto) };
+    return { ...dto, executives: (await repo.list({ managerId: id })).map(toExecutiveDto) };
   }
 
   async function create(input: {
@@ -54,9 +52,9 @@ function createUserService(role: ManagedRole) {
     username: string;
     password: string;
     designation?: UserDesignation;
-    teamId?: string | null;
+    managerId?: string | null;
   }) {
-    if (input.teamId) await assertTeamAssignable(input.teamId);
+    if (input.managerId) await assertValidManager(input.managerId);
     const id = await repo.insert({
       role,
       designation: role === 'MANAGER' ? 'MANAGER' : (input.designation ?? 'SALES_EXECUTIVE'),
@@ -65,7 +63,7 @@ function createUserService(role: ManagedRole) {
       phone: input.phone ?? null,
       username: input.username,
       passwordHash: await hashPassword(input.password),
-      teamId: input.teamId ?? null,
+      managerId: input.managerId ?? null,
     });
     return reload(id);
   }
@@ -78,13 +76,13 @@ function createUserService(role: ManagedRole) {
       phone?: string | null;
       username?: string;
       designation?: UserDesignation;
-      teamId?: string | null;
+      managerId?: string | null;
     },
   ) {
     const exec = await getUser(id);
-    const { teamId, ...profile } = input;
-    if (teamId && teamId !== exec.team_id) await assertCanJoinTeam(exec, teamId);
-    await repo.updateProfile(id, { ...profile, team_id: teamId });
+    const { managerId, ...profile } = input;
+    if (managerId && managerId !== exec.manager_id) await assertCanReport(exec, managerId);
+    await repo.updateProfile(id, { ...profile, manager_id: managerId });
     return reload(id);
   }
 
@@ -110,25 +108,31 @@ function createUserService(role: ManagedRole) {
     await repo.softDelete(id);
     disconnectUser(id);
     await revokeUserDevices(id);
-    if (role === 'MANAGER') await repo.clearManagerFromTeams(id);
+    if (role === 'MANAGER') await repo.clearManagerFrom(id);
     const row = await repo.findById(id);
     return toExecutiveDto(row!);
   }
 
-  async function assignTeam(id: string, teamId: string) {
-    const exec = await getUser(id);
-    await assertCanJoinTeam(exec, teamId);
-    await repo.setTeam(id, teamId);
+  /** Only sales users have a manager, and they must be active themselves. */
+  async function assertCanReport(exec: ExecutiveRow, managerId: string): Promise<void> {
+    if (exec.role !== 'SALES') throw new AppError(400, 'Only sales executives can have a manager');
+    if (!exec.is_active) throw new AppError(409, 'Executive is inactive');
+    await assertValidManager(managerId);
+  }
+
+  async function assignManager(id: string, managerId: string) {
+    await assertCanReport(await getUser(id), managerId);
+    await repo.setManager(id, managerId);
     return reload(id);
   }
 
-  async function removeFromTeam(id: string) {
+  async function removeManager(id: string) {
     await getUser(id);
-    await repo.setTeam(id, null);
+    await repo.setManager(id, null);
     return reload(id);
   }
 
-  return { list, details, create, update, changePassword, setStatus, remove, assignTeam, removeFromTeam };
+  return { list, details, create, update, changePassword, setStatus, remove, assignManager, removeManager };
 }
 
 export const executiveService = createUserService('SALES');

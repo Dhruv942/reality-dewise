@@ -1,7 +1,7 @@
 import { pool } from '../../database/pool';
 import { patchRow } from '../../database/patch';
 import type { Db } from '../../database/transaction';
-import { escapeLike } from '../teams/team.repository';
+import { escapeLike } from '../../utils/like';
 import type { CustomerRow } from './customer.model';
 
 /**

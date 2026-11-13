@@ -45,13 +45,13 @@ describe('manager accounts (admin creates and manages them)', () => {
   let m: any;
   it('create: role MANAGER, designation MANAGER, own username/email/password', async () => {
     m = await t.manager('mgr.one');
-    assert.deepEqual([m.role, m.designation, m.username, m.isActive, m.team], ['MANAGER', 'MANAGER', 'mgr.one', true, null]);
+    assert.deepEqual([m.role, m.designation, m.username, m.isActive, m.manager], ['MANAGER', 'MANAGER', 'mgr.one', true, null]);
     assert.equal((await t.call('/admin/managers', 'POST', { name: 'Dup', email: 'mgr.one@test.com', username: 'other', password: 'TempPass123' })).status, 409);
     assert.equal((await t.call('/admin/managers', 'POST', { name: 'Dup', email: 'd@test.com', username: 'mgr.one', password: 'TempPass123' })).status, 409);
   });
-  it('validation: no team membership, designation or role on a manager; weak password', async () => {
+  it('validation: no manager, designation or role on a manager; weak password', async () => {
     const base = { name: 'M', email: 'mv@test.com', username: 'mgr.v', password: 'TempPass123' };
-    for (const extra of [{ teamId: ZERO }, { designation: 'MANAGER' }, { role: 'ADMIN' }, { password: 'short' }]) {
+    for (const extra of [{ managerId: ZERO }, { designation: 'MANAGER' }, { role: 'ADMIN' }, { password: 'short' }]) {
       assert.equal((await t.call('/admin/managers', 'POST', { ...base, ...extra })).status, 400, JSON.stringify(extra));
     }
   });
@@ -74,37 +74,38 @@ describe('manager accounts (admin creates and manages them)', () => {
     assert.equal(await t.login('manager', 'mgr.one@test.com', 'NewPass12345'), undefined);
     await t.call(`/admin/managers/${m.id}/status`, 'PATCH', { isActive: true });
   });
-  it('soft delete hides the manager and releases their teams', async () => {
+  it('soft delete hides the manager and releases their executives', async () => {
     const gone = await t.manager('mgr.gone');
-    const team = (await t.call('/admin/teams', 'POST', { name: 'Gone Team', managerId: gone.id })).body;
-    assert.equal(team.manager.id, gone.id);
+    const e = await t.exec('gone.sales', gone.id);
+    assert.equal(e.manager.id, gone.id);
     assert.equal((await t.call(`/admin/managers/${gone.id}`, 'DELETE')).status, 200);
     assert.equal((await t.call(`/admin/managers/${gone.id}`)).status, 404);
-    assert.equal((await t.call(`/admin/teams/${team.id}`)).body.manager, null);
+    assert.equal((await t.call(`/admin/executives/${e.id}`)).body.manager, null);
   });
 });
 
-describe('teams are led by a manager', () => {
-  it('create/update with a manager; invalid managers are refused; list by manager; details list managed teams', async () => {
-    const m = await t.manager('team.mgr');
-    const e = await t.exec('team.sales');
-    const off = await t.manager('team.off');
+describe('executives report to a manager', () => {
+  it('create/update with a manager; invalid managers are refused; list by manager; details list their executives', async () => {
+    const m = await t.manager('rep.mgr');
+    const off = await t.manager('rep.off');
     await t.call(`/admin/managers/${off.id}/status`, 'PATCH', { isActive: false });
+    const mk = (username: string, managerId?: string) =>
+      t.call('/admin/executives', 'POST', { name: username, email: `${username}@test.com`, username, password: 'TempPass123', managerId });
 
-    const team = (await t.call('/admin/teams', 'POST', { name: 'Led Team', managerId: m.id })).body;
-    assert.deepEqual(team.manager, { id: m.id, name: 'Team.mgr' });
-    assert.equal((await t.call('/admin/teams', 'POST', { name: 'Bad 1', managerId: e.id })).status, 400, 'a sales user is not a manager');
-    assert.equal((await t.call('/admin/teams', 'POST', { name: 'Bad 2', managerId: ZERO })).status, 400);
-    assert.equal((await t.call('/admin/teams', 'POST', { name: 'Bad 3', managerId: off.id })).status, 409, 'inactive manager');
+    const e = (await mk('rep.sales', m.id)).body;
+    assert.deepEqual(e.manager, { id: m.id, name: 'Rep.mgr', isActive: true });
+    assert.equal((await mk('rep.bad1', e.id)).status, 400, 'a sales user is not a manager');
+    assert.equal((await mk('rep.bad2', ZERO)).status, 400);
+    assert.equal((await mk('rep.bad3', off.id)).status, 409, 'inactive manager');
 
-    const plain = (await t.call('/admin/teams', 'POST', { name: 'Plain Team' })).body;
+    const plain = (await mk('rep.plain')).body;
     assert.equal(plain.manager, null);
-    assert.equal((await t.call(`/admin/teams/${plain.id}`, 'PATCH', { managerId: m.id })).body.manager.id, m.id);
-    assert.equal((await t.call(`/admin/teams/${plain.id}`, 'PATCH', { managerId: null })).body.manager, null);
-    assert.deepEqual((await t.call(`/admin/teams?managerId=${m.id}`)).body.map((x: any) => x.id), [team.id]);
-    assert.deepEqual((await t.call(`/admin/managers/${m.id}`)).body.managedTeams.map((x: any) => x.id), [team.id]);
-    // a manager is never a team member
-    assert.equal((await t.call(`/admin/executives/${m.id}/team`, 'PATCH', { teamId: team.id })).status, 400);
+    assert.equal((await t.call(`/admin/executives/${plain.id}`, 'PATCH', { managerId: m.id })).body.manager.id, m.id);
+    assert.equal((await t.call(`/admin/executives/${plain.id}`, 'PATCH', { managerId: null })).body.manager, null);
+    assert.deepEqual((await t.call(`/admin/executives?managerId=${m.id}`)).body.map((x: any) => x.id), [e.id]);
+    assert.deepEqual((await t.call(`/admin/managers/${m.id}`)).body.executives.map((x: any) => x.id), [e.id]);
+    // a manager never has a manager
+    assert.equal((await t.call(`/admin/executives/${m.id}/manager`, 'PATCH', { managerId: m.id })).status, 400);
   });
 });
 
@@ -130,7 +131,7 @@ describe('login: own username and password, one portal per role', () => {
     const sTok = t.asToken(await t.login('executive', 'login.s@test.com', 'TempPass123'));
     for (const path of ['/admin/leads', '/admin/managers', '/admin/executives', '/executive/leads']) assert.equal((await mTok(path)).status, 403, `manager ${path}`);
     assert.equal((await mTok('/manager/leads')).status, 200);
-    for (const path of ['/manager/leads', '/manager/teams', '/manager/executives', '/admin/leads']) assert.equal((await sTok(path)).status, 403, `sales ${path}`);
+    for (const path of ['/manager/leads', '/manager/properties', '/manager/executives', '/admin/leads']) assert.equal((await sTok(path)).status, 403, `sales ${path}`);
     for (const path of ['/manager/leads', '/executive/leads']) assert.equal((await t.call(path)).status, 403, `admin ${path}`);
     assert.equal((await t.asToken('')('/manager/leads')).status, 401);
   });
@@ -150,12 +151,10 @@ describe('lead assignment by admin and manager', () => {
   before(async () => {
     mA = await t.manager('asg.ma');
     mB = await t.manager('asg.mb');
-    const teamA = (await t.call('/admin/teams', 'POST', { name: 'Team A', managerId: mA.id })).body;
-    const teamB = (await t.call('/admin/teams', 'POST', { name: 'Team B', managerId: mB.id })).body;
-    a1 = await t.exec('asg.a1', teamA.id);
-    a2 = await t.exec('asg.a2', teamA.id);
-    em = await t.exec('asg.em', teamA.id, 'EXECUTIVE_MANAGER');
-    b1 = await t.exec('asg.b1', teamB.id);
+    a1 = await t.exec('asg.a1', mA.id);
+    a2 = await t.exec('asg.a2', mA.id);
+    em = await t.exec('asg.em', mA.id, 'EXECUTIVE_MANAGER');
+    b1 = await t.exec('asg.b1', mB.id);
     prop = await t.property('Assign Towers', [a1.id]);
     open = await t.property('Open Plaza'); // no executives: its leads are pending
     callMA = t.asToken(await t.login('manager', 'asg.ma@test.com', 'TempPass123'));
@@ -216,15 +215,15 @@ describe('lead assignment by admin and manager', () => {
     assert.equal((await historyOf(l.id)).length, before);
   });
 
-  it('manager sees only their teams\' leads plus unassigned ones', async () => {
-    const mine = (await lead()).body; // a1 (team A)
+  it('manager sees only their executives\' leads plus unassigned ones', async () => {
+    const mine = (await lead()).body; // a1 (manager A)
     const theirs = (await lead()).body;
-    await t.call(`/admin/leads/${theirs.id}/assign`, 'PATCH', { executiveId: b1.id }); // team B
+    await t.call(`/admin/leads/${theirs.id}/assign`, 'PATCH', { executiveId: b1.id }); // manager B
     const pending = (await lead({ propertyName: open.name })).body;
 
     const ids = (await callMA('/manager/leads?limit=200')).body.map((l: any) => l.id);
     assert.ok(ids.includes(mine.id) && ids.includes(pending.id));
-    assert.ok(!ids.includes(theirs.id), "another manager's team lead is not visible");
+    assert.ok(!ids.includes(theirs.id), "another manager's executive's lead is not visible");
     assert.ok((await callMB('/manager/leads?limit=200')).body.some((l: any) => l.id === theirs.id));
     assert.equal((await callMA(`/manager/leads/${theirs.id}`)).status, 404);
     assert.equal((await callMA(`/manager/leads/${mine.id}`)).status, 200);
@@ -241,7 +240,7 @@ describe('lead assignment by admin and manager', () => {
     assert.equal((await callA1(`/executive/leads?isNew=true&limit=200`)).body.some((l: any) => l.id === second.id), true);
   });
 
-  it('manager assigns within their own team only', async () => {
+  it('manager assigns to their own executives only', async () => {
     const l = (await lead({ propertyName: open.name })).body; // pending
     const own = await callMA(`/manager/leads/${l.id}/assign`, 'PATCH', { executiveId: a2.id });
     assert.equal(own.status, 200);
@@ -250,15 +249,15 @@ describe('lead assignment by admin and manager', () => {
 
     const other = (await lead({ propertyName: open.name })).body;
     const cross = await callMA(`/manager/leads/${other.id}/assign`, 'PATCH', { executiveId: b1.id });
-    assert.equal(cross.status, 403, "not an executive of the manager's teams");
+    assert.equal(cross.status, 403, "not one of the manager's executives");
     assert.equal((await t.call(`/admin/leads/${other.id}`)).body.assignedExecutive, null, 'nothing changed');
 
-    const unplaced = await t.exec('asg.nomember'); // no team at all
+    const unplaced = await t.exec('asg.unmanaged'); // no manager at all
     assert.equal((await callMA(`/manager/leads/${other.id}/assign`, 'PATCH', { executiveId: unplaced.id })).status, 403);
     assert.equal((await callMA(`/manager/leads/${other.id}/assign`, 'PATCH', { executiveId: mA.id })).status, 400);
   });
 
-  it('manager cannot touch a lead of another manager\'s team (404, like it does not exist)', async () => {
+  it('manager cannot touch a lead of another manager\'s executive (404, like it does not exist)', async () => {
     const l = (await lead()).body;
     await t.call(`/admin/leads/${l.id}/assign`, 'PATCH', { executiveId: b1.id });
     assert.equal((await callMA(`/manager/leads/${l.id}/assign`, 'PATCH', { executiveId: a1.id })).status, 404);
@@ -304,8 +303,8 @@ describe('lead assignment by admin and manager', () => {
     assert.deepEqual([...got].sort(), [a1.id, em.id].sort());
   });
 
-  it('manager portal: own teams and the executives in them', async () => {
-    assert.deepEqual((await callMA('/manager/teams')).body.map((x: any) => x.name), ['Team A']);
+  it('manager portal: only their own executives; the teams API is gone', async () => {
+    assert.equal((await callMA('/manager/teams')).status, 404);
     const names = (await callMA('/manager/executives')).body.map((x: any) => x.username).sort();
     assert.deepEqual(names, ['asg.a1', 'asg.a2', 'asg.em']);
     assert.ok((await callMA('/manager/executives')).body.every((x: any) => x.role === 'SALES'));

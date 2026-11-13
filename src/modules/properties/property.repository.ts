@@ -1,7 +1,7 @@
 import { pool } from '../../database/pool';
 import { patchRow } from '../../database/patch';
 import type { Db } from '../../database/transaction';
-import { escapeLike } from '../teams/team.repository';
+import { escapeLike } from '../../utils/like';
 import type { PropertyExecutiveRow, PropertyRow } from './property.model';
 
 /** Must stay identical to the generated column `properties.name_key` (see migration 007). */
@@ -67,6 +67,20 @@ export async function listExecutives(propertyId: string, db: Db = pool): Promise
     [propertyId],
   );
   return rows;
+}
+
+/** Serialises concurrent edits of one property's executive list. */
+export const lockForUpdate = (db: Db, propertyId: string) =>
+  db.query('SELECT 1 FROM properties WHERE id = $1 FOR UPDATE', [propertyId]);
+
+/** The property's executives that do NOT report to `managerId`: the part of the list that manager may not change. */
+export async function listExecutiveIdsNotManagedBy(db: Db, propertyId: string, managerId: string): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(
+    `SELECT u.id FROM property_executives pe JOIN users u ON u.id = pe.executive_id
+     WHERE pe.property_id = $1 AND u.manager_id IS DISTINCT FROM $2::uuid`,
+    [propertyId, managerId],
+  );
+  return rows.map((r) => r.id);
 }
 
 /** Replaces the property's executive list with exactly `executiveIds`. */

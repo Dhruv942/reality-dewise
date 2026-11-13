@@ -7,6 +7,8 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   JWT_EXPIRES_IN: z.string().min(1).default('1h'),
+  /** How long a login can be renewed without typing the password again, counted from the login (never extended). */
+  REFRESH_EXPIRES_IN: z.string().min(1).default('30d'),
   DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   /** Comma-separated browser origins allowed to call the API, e.g. "https://crm.example.com". Empty = no CORS. */
   CORS_ORIGINS: z.string().default(''),

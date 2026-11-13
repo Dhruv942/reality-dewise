@@ -1,5 +1,5 @@
 /** TIMEOUT = the lead stayed INCOMING past the timeout and the system moved it to the next executive. */
-export type AssignmentMethod = 'ROUND_ROBIN' | 'MANUAL' | 'TIMEOUT';
+export type AssignmentMethod = 'ROUND_ROBIN' | 'MANUAL' | 'TRANSFER' | 'TIMEOUT';
 
 export interface AssignmentResult {
   historyId: string;
@@ -17,6 +17,7 @@ export interface AssignmentHistoryRow {
   lead_id: string | null;
   method: AssignmentMethod;
   assigned_by_id: string | null;
+  reason: string | null;
   created_at: Date;
   executive_name?: string;
   executive_username?: string;
@@ -28,8 +29,9 @@ export const toHistoryDto = (h: AssignmentHistoryRow) => ({
   propertyId: h.property_id,
   executive: { id: h.executive_id, name: h.executive_name, username: h.executive_username },
   leadId: h.lead_id,
-  // ROUND_ROBIN (system) or MANUAL (an admin/manager picked the executive).
+  // ROUND_ROBIN (system), MANUAL (initial/manual assignment), TRANSFER, or TIMEOUT.
   method: h.method,
+  reason: h.reason,
   assignedBy: h.assigned_by_id ? { id: h.assigned_by_id, name: h.assigned_by_name ?? null } : null,
   createdAt: h.created_at,
 });

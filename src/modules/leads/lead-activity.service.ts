@@ -2,7 +2,7 @@ import type { Db } from '../../database/transaction';
 import * as settingsRepo from '../settings/settings.repository';
 import * as repo from './lead-activity.repository';
 import type { ActivityRow } from './lead-activity.repository';
-import type { LeadStatus } from './lead.model';
+import type { LeadStatus, StatusReasonCode } from './lead.model';
 
 /** Writes the timeline entries for a lead change, inside the transaction that makes the change. They return the rows so the caller can announce them after the commit. */
 
@@ -16,6 +16,20 @@ export async function recordReceived(db: Db, leadId: string, source: string, act
 }
 
 export type AssignHow = 'ROUND_ROBIN' | 'PENDING_ASSIGNED' | 'MANUAL';
+
+export async function recordTransferred(db: Db, a: { leadId: string; previousExecutiveId: string; executiveId: string; actorId: string; reason?: string }): Promise<ActivityRow[]> {
+  const previous = await nameOf(db, a.previousExecutiveId);
+  const next = await nameOf(db, a.executiveId);
+  const detail = a.reason ? ` Reason: ${a.reason}` : '';
+  const transferred = await repo.add(db, {
+    leadId: a.leadId,
+    type: 'TRANSFERRED',
+    message: `Transferred from ${previous} to ${next} by ${await nameOf(db, a.actorId)}.${detail}`,
+    actorId: a.actorId,
+    executiveId: a.executiveId,
+  });
+  return [transferred, await slaStarted(db, a.leadId, a.executiveId)];
+}
 
 /** The lead now belongs to `executiveId`: who gave it, and the start of that executive's SLA. */
 export async function recordAssigned(db: Db, a: { leadId: string; executiveId: string; how: AssignHow; byId?: string }): Promise<ActivityRow[]> {
@@ -42,11 +56,12 @@ export async function recordTimeout(db: Db, a: { leadId: string; previousExecuti
   return [breached, moved, await slaStarted(db, a.leadId, a.executiveId)];
 }
 
-export async function recordStatus(db: Db, a: { leadId: string; status: LeadStatus; actorId?: string; executiveId?: string | null }): Promise<ActivityRow> {
+export async function recordStatus(db: Db, a: { leadId: string; status: LeadStatus; actorId?: string; executiveId?: string | null; reason?: StatusReasonCode; otherReason?: string | null }): Promise<ActivityRow> {
+  const reason = a.reason ? ` (${a.reason === 'OTHER' ? a.otherReason : a.reason})` : '';
   return repo.add(db, {
     leadId: a.leadId,
     type: 'STATUS_CHANGED',
-    message: `Status changed to ${title(a.status)}${a.actorId ? ` by ${await nameOf(db, a.actorId)}` : ''}`,
+    message: `Status changed to ${title(a.status)}${reason}${a.actorId ? ` by ${await nameOf(db, a.actorId)}` : ''}`,
     actorId: a.actorId,
     executiveId: a.executiveId,
   });

@@ -12,3 +12,9 @@ propertyRouter.patch('/:id', validateBody(updatePropertySchema), c.update);
 propertyRouter.patch('/:id/status', validateBody(statusSchema), c.setStatus);
 propertyRouter.put('/:id/executives', validateBody(setExecutivesSchema), c.setExecutives);
 propertyRouter.get('/:id/assignment-history', c.history);
+
+/** A manager sees every property and edits only their own executives' part of its list. */
+export const managerPropertyRouter = Router();
+managerPropertyRouter.get('/', c.list);
+managerPropertyRouter.get('/:id', c.get);
+managerPropertyRouter.put('/:id/executives', validateBody(setExecutivesSchema), c.managerSetExecutives);

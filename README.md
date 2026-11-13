@@ -62,7 +62,7 @@ Check it works: `curl http://localhost:4000/health` → `{"status":"ok","db":"up
 | `npm run migrate:up` | Apply pending migrations to the `.env` database |
 | `npm run migrate:down` | Revert the last migration (see warning below) |
 | `npm run migrate:test` | Apply migrations to the **test** database (`.env.test`) |
-| `npm run seed` / `npm run seed:prod` | Create/update the admin, an optional manager and up to 3 executives, with the manager leading a team of the executives. Re-running resets those accounts' passwords and reactivates them, so use different `SEED_*_EMAIL` values to add accounts without touching existing ones (`seed:prod` runs the compiled `dist` version) |
+| `npm run seed` / `npm run seed:prod` | Create/update the admin, an optional manager and up to 3 executives, with the executives reporting to the manager. Re-running resets those accounts' passwords and reactivates them, so use different `SEED_*_EMAIL` values to add accounts without touching existing ones (`seed:prod` runs the compiled `dist` version) |
 | `npm test` | Run the whole test suite against the test database |
 
 > Migrations `007`, `009` and `010` rewrite or drop columns/types and cannot be fully reversed. Back up before running migrations on a database you care about.
@@ -77,7 +77,8 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 | `JWT_SECRET` | yes | | ≥ 32 chars. `openssl rand -hex 48` |
 | `NODE_ENV` | no | `production` | `development` enables `/test-console` |
 | `PORT` | no | `4000` | |
-| `JWT_EXPIRES_IN` | no | `1h` | No refresh tokens: users log in again when it expires |
+| `JWT_EXPIRES_IN` | no | `1h` | Lifetime of the access token; the portal renews it with a refresh token (see `REFRESH_EXPIRES_IN`) |
+| `REFRESH_EXPIRES_IN` | | `30d` | How long a login can be renewed without the password (`POST /auth/refresh`), counted from the login and never extended. Deactivating the account or changing its password ends it. |
 | `DB_POOL_MAX` | no | `10` | |
 | `CORS_ORIGINS` | no | empty | Comma-separated frontend origins. Empty = same-origin only |
 | `TRUST_PROXY` | no | unset | Number of proxies in front of the app (1 on most PaaS) so rate limiting sees the real IP |
@@ -87,7 +88,7 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 | `SLA_WARNING_MINUTES` | no | `10` | How long before the SLA runs out the executive gets `lead:sla-warning` (capped at half the SLA; `0` disables it) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | unset | Web Push for closed-app notifications. Set all three or none. Generate: `npx web-push generate-vapid-keys`; subject like `mailto:ops@example.com` |
 | `LOGIN_RATE_LIMIT_MAX` / `LOGIN_RATE_LIMIT_WINDOW_MINUTES` | no | `10` / `15` | Failed-login limiter |
-| `SEED_*` | for `seed` | | Email, username, name and password for the admin, the manager (`SEED_MANAGER_*`), executive 1 (`SEED_EXECUTIVE_*`) and executives 2-3 (`SEED_EXECUTIVE_2_*`, `SEED_EXECUTIVE_3_*`), plus `SEED_TEAM_NAME`. **No default passwords exist**; an empty optional password skips that account |
+| `SEED_*` | for `seed` | | Email, username, name and password for the admin, the manager (`SEED_MANAGER_*`), executive 1 (`SEED_EXECUTIVE_*`) and executives 2-3 (`SEED_EXECUTIVE_2_*`, `SEED_EXECUTIVE_3_*`). **No default passwords exist**; an empty optional password skips that account |
 
 `.env` and `.env.test` are git-ignored. Never commit them.
 
@@ -108,7 +109,6 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 │   └── modules/                  # one folder per feature (see "Module layout")
 │       ├── auth/                 # admin & executive login, /auth/me, JWT middleware, role guard
 │       ├── users/                # shared user table access
-│       ├── teams/                # teams CRUD (group sales users; each team can have a manager)
 │       ├── executives/           # account management shared by sales users and managers (one service, two roles)
 │       ├── managers/             # /admin/managers routes (reuse the executives service)
 │       ├── properties/           # properties: list/edit, pick executives (created by leads)
@@ -117,10 +117,10 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 │       ├── customers/            # clients: one per mobile number, with enquiry history
 │       ├── leads/                # lead creation flow, status, executive "new lead" tracking
 │       ├── admin/admin.routes.ts # mounts every admin module under /api/v1/admin (ADMIN only)
-│       ├── manager-portal/       # /api/v1/manager: a manager's teams, executives and leads, lead assignment (MANAGER only)
+│       ├── manager-portal/       # /api/v1/manager: a manager's executives, leads, lead assignment and property executive lists (MANAGER only)
 │       └── executive-portal/     # /api/v1/executive: a sales user's own leads (SALES only)
 ├── migrations/                   # numbered SQL migrations (001 … 014)
-├── seed/seed-users.ts            # creates the first admin, an optional manager and up to 3 executives (plus their team)
+├── seed/seed-users.ts            # creates the first admin, an optional manager and up to 3 executives (the executives report to the manager)
 ├── tests/                        # integration tests (real HTTP + real Postgres)
 ├── public/test-console.html      # dev-only manual API tester
 ├── docs/                         # ARCHITECTURE.md (design) · FRONTEND_ROUND_ROBIN_GUIDE.md (frontend guide for round robin assignment)
@@ -161,7 +161,7 @@ Lead received (name, mobile, propertyName, source, requirement, budget …)
    └─ 6. Still INCOMING after the SLA (90 min by default, 24/7, admin-set)? → reassigned to the next executive, repeating until someone handles it
 ```
 
-- **Roles:** `ADMIN` (everything under `/admin`, creates every account), `MANAGER` (`/manager`: leads teams, assigns leads to the sales users of those teams) and `SALES` (`/executive`: works their own leads). A separate `designation` (`MANAGER`, `SALES_EXECUTIVE`, `EXECUTIVE_MANAGER`) labels users: **Sales Executive and Executive Manager are the same role with identical permissions**. Tokens are role-bound, users sign in with email or username, and changing a password invalidates older tokens.
+- **Roles:** `ADMIN` (everything under `/admin`, creates every account), `MANAGER` (`/manager`: looks after the sales users whose `managerId` is them, assigns leads and properties to them) and `SALES` (`/executive`: works their own leads). A separate `designation` (`MANAGER`, `SALES_EXECUTIVE`, `EXECUTIVE_MANAGER`) labels users: **Sales Executive and Executive Manager are the same role with identical permissions**. Tokens are role-bound, users sign in with email or username, and changing a password invalidates older tokens.
 - **Lead statuses:** `INCOMING → RINGING → CONNECTED → CLOSED / LOST / BROKER` (any order), plus the system status `PENDING_ASSIGNMENT`.
 - **"New lead" for executives:** there is no push system yet. Each lead has `isNew` and `assignedAt`, and `/executive/leads/summary` gives the badge count. The frontend polls (see section 6 of `docs/FRONTEND_ROUND_ROBIN_GUIDE.md`).
 
@@ -172,16 +172,16 @@ Base path `/api/v1`. All errors look like `{ "success": false, "message": "…",
 | Area | Endpoints | Who |
 |---|---|---|
 | Auth | `POST /auth/admin/login`, `/auth/manager/login`, `/auth/executive/login`, `GET /auth/me` | public / any token |
-| Teams | `/admin/teams` (list, create, get, update incl. `managerId`, status, members) | admin |
 | Managers | `/admin/managers` (CRUD, status, password) | admin |
-| Sales executives | `/admin/executives` (CRUD incl. `designation`, status, password, team) | admin |
+| Sales executives | `/admin/executives` (CRUD incl. `designation`, `managerId`, status, password; `PATCH/DELETE /:id/manager` sets or clears the manager) | admin |
 | Properties | `/admin/properties` (list, get, edit, status, `PUT :id/executives`, assignment history) | admin |
 | Clients | `/admin/customers` (list, get with all enquiries, edit) | admin |
 | Leads | `/admin/leads` (create, list, get + client history, status, `:id/assign`) | admin |
 | Settings | `GET` / `PUT` `/admin/settings/assignment-rule` (default `ROUND_ROBIN`) and `/admin/settings/lead-timeout` (SLA, default 90 minutes) | admin only |
-| Manager portal | `/manager/teams`, `/manager/executives`, `/manager/leads` (list, get, `:id/assign`) | manager |
+| Manager portal | `/manager/executives` (list, get), `/manager/leads` (list, get, `:id/assign`), `/manager/properties` (list, get, `PUT :id/executives`: only their own executives' part of the list) | manager |
 | Executive portal | `/executive/leads` (list, `summary`, get, status) | sales executive / executive manager |
 | Important leads | `POST` / `DELETE` `…/leads/:id/important` in each portal; `isImportant` on every lead, `?important=true` filter | admin, manager, sales |
+| Personal notes | `GET` / `POST /notes`, `GET` / `PATCH` / `DELETE /notes/:id` (`?search`, `limit`, `offset`) | any logged-in user (own notes only) |
 | Notifications | `GET /notifications` (`?unread=true`, `limit`, `offset`; includes `unreadCount`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` | any logged-in user (own notifications only) |
 | Web Push | `GET /push/public-key`, `POST /push/subscriptions`, `DELETE /push/subscriptions` (own devices only). See `docs/FRONTEND_PUSH_GUIDE.md` | any logged-in user |
 | Health | `GET /health` | public |
@@ -203,7 +203,7 @@ npm run migrate:test
 npm test
 ```
 
-The tests start the real app on a random port and call it over HTTP against real Postgres, including concurrency cases (parallel leads, duplicate webhooks, round-robin fairness). **Each run truncates `users`, `teams`, `customers` and `properties` in the test database**, so never aim `.env.test` at real data.
+The tests start the real app on a random port and call it over HTTP against real Postgres, including concurrency cases (parallel leads, duplicate webhooks, round-robin fairness). **Each run truncates `users`, `customers` and `properties` in the test database**, so never aim `.env.test` at real data.
 
 ## Deployment
 

@@ -14,7 +14,7 @@ import { toLeadDto, type LeadRow, type LeadStatus } from './lead.model';
  * Who hears about a lead mirrors who can see it over REST:
  *   admin                -> every lead                              (room "admin")
  *   the assigned sales   -> their own leads                         (room "executive:<id>")
- *   managers             -> leads of their teams, and unassigned    (rooms "manager:<id>" / "managers")
+ *   managers             -> leads of their executives, and unassigned (rooms "manager:<id>" / "managers")
  * The previous executive of a moved lead only gets a minimal payload (no customer details): they can no longer see it.
  */
 
@@ -37,14 +37,13 @@ const emit = (event: string, to: string[], payload: unknown, except: string[] = 
   emitTo(event, to, payload, leadId ? `lead=${leadId}` : '', except);
 };
 
-/** Managers leading the team of any of these executives. */
+/** The managers that any of these executives report to (users.manager_id). */
 async function managersOf(executiveIds: (string | null | undefined)[]): Promise<string[]> {
   const ids = executiveIds.filter((id): id is string => !!id);
   if (ids.length === 0) return [];
   const { rows } = await pool.query<{ id: string }>(
     `SELECT DISTINCT m.id FROM users u
-     JOIN teams t ON t.id = u.team_id
-     JOIN users m ON m.id = t.manager_id AND m.is_active AND m.deleted_at IS NULL
+     JOIN users m ON m.id = u.manager_id AND m.is_active AND m.deleted_at IS NULL
      WHERE u.id = ANY($1::uuid[])`,
     [ids],
   );
@@ -70,6 +69,67 @@ const emitActivities = (to: string[], activities: ActivityRow[] = []) => {
 
 const label = (row: LeadRow) => `Lead #${row.lead_no} (${row.property_name})`;
 
+const displayStatus = (status: string) => status.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+const plain = (value: unknown, fallback = 'Not available') => {
+  const text = String(value ?? '').replace(/[\r\n]+/g, ' ').trim();
+  return text || fallback;
+};
+
+/** Builds the complete in-app message for admins/managers without inventing a deal from a CLOSED status. */
+async function newLeadMessage(row: LeadRow): Promise<string> {
+  const previous = await repo.listForCustomer(row.customer_id, row.id, 50);
+  const propertyOrRequirement = [row.requested_property_name ?? row.property_name, row.requirement].filter(Boolean).join(' / ');
+  const assigned = plain(row.executive_name, 'Unassigned');
+  const email = plain(row.customer_email);
+  const previousProperties = [...new Set(previous.map((p) => plain([p.property_name, p.requirement].filter(Boolean).join(' / '))))];
+  const previousStatuses = [...new Set(previous.map((p) => displayStatus(p.status)))];
+  const previousFollowUp = previous.find((p) => p.follow_up_at);
+  const previousRemarks = [...new Set(previous.map((p) => p.message).filter((m): m is string => !!m).map((m) => plain(m)))];
+  const previousReasons = previous
+    .filter((p) => (p.status === 'LOST' || p.status === 'INVALID') && p.status_reason)
+    .map((p) => {
+      const code = p.status_reason!;
+      return `${displayStatus(p.status)}: ${plain(code === 'OTHER' ? p.status_reason_other : displayStatus(code))}`;
+    });
+  const closedStatus = previous.some((p) => p.status === 'CLOSED');
+  const previousCount = String(previous.length);
+  const properties = previousProperties.join('; ') || 'Not available';
+  const statuses = previousStatuses.join(', ') || 'Not available';
+  const lastFollowUp = previousFollowUp
+    ? `${previousFollowUp.follow_up_at?.toISOString()}${previousFollowUp.follow_up_note ? ` — ${plain(previousFollowUp.follow_up_note)}` : ''}`
+    : 'Not available';
+  const remarks = previousRemarks.join('; ') || 'Not available';
+  const reasons = previousReasons.join('; ') || 'Not available';
+  const recordedDeals = `No recorded deal/conversion record found${closedStatus ? ' (a previous lead was marked Closed)' : ''}.`;
+  const summary = previous.length
+    ? `Returning customer with ${previous.length} previous CRM enquir${previous.length === 1 ? 'y' : 'ies'}; ${recordedDeals.toLowerCase()}`
+    : 'No previous enquiries or recorded deals/conversions were found in the CRM.';
+
+  return [
+    '*New Lead Received — Customer History*',
+    '',
+    '*Customer Details*',
+    `Name: ${plain(row.customer_name)}`,
+    `Phone: ${plain(row.customer_mobile)}`,
+    `Email: ${email}`,
+    `Lead No.: ${plain(row.lead_no)}`,
+    `Property/Requirement: ${plain(propertyOrRequirement)}`,
+    `Source: ${plain(row.source)}`,
+    `Assigned Executive: ${assigned}`,
+    '',
+    '*Previous Customer History*',
+    `Previous Enquiries: ${previousCount}`,
+    `Previous Properties/Requirements: ${properties}`,
+    `Previous Lead Statuses: ${statuses}`,
+    `Previous Follow-up: ${lastFollowUp}`,
+    `Previous Remarks: ${remarks}`,
+    `Lost/Invalid Reason: ${reasons}`,
+    `Recorded Deals/Conversions: ${recordedDeals}`,
+    '',
+    `*Summary:* ${summary}`,
+  ].join('\n');
+}
+
 /** A lead was just created (and, when a property executive was available, already assigned by round-robin). */
 export const publishLeadCreated = (leadId: string, activities: ActivityRow[] = []) =>
   safely('lead:created', async () => {
@@ -84,19 +144,26 @@ export const publishLeadCreated = (leadId: string, activities: ActivityRow[] = [
       // Nobody could take it: admins and managers have to act, so they get a notification.
       await notifyAll([...(await activeUserIds('ADMIN')), ...(await activeUserIds('MANAGER'))], {
         type: 'LEAD_CREATED',
-        title: 'New Lead Needs Assignment',
-        message: `${label(row)} is waiting for an executive. Assign an executive to its property or assign it directly.`,
+        title: 'New Lead Received — Customer History',
+        message: await newLeadMessage(row),
         leadId,
         dedupeKey: `lead-created:${leadId}`,
       });
     } else {
+      await notifyAll([...(await activeUserIds('ADMIN')), ...(await managersOf([row.executive_id]))], {
+        type: 'LEAD_CREATED',
+        title: 'New Lead Received — Customer History',
+        message: await newLeadMessage(row),
+        leadId,
+        dedupeKey: `lead-created:${leadId}`,
+      });
       await publishAssignment({ leadId, previousExecutiveId: null, reason: a_created(activities), activities }, row);
     }
   });
 
 const a_created = (activities: ActivityRow[]): AssignmentReason => (activities.some((x) => x.type === 'ASSIGNED' && x.actor_id) ? 'MANUAL' : 'CREATED');
 
-export type AssignmentReason = 'CREATED' | 'PENDING_ASSIGNED' | 'MANUAL' | 'SLA_TIMEOUT';
+export type AssignmentReason = 'CREATED' | 'PENDING_ASSIGNED' | 'MANUAL' | 'TRANSFER' | 'SLA_TIMEOUT';
 
 /**
  * The lead now belongs to a (new) executive. `lead:assigned` for a first assignment, `lead:reassigned` when it
@@ -134,7 +201,7 @@ export const publishAssignment = (
       entityId: a.leadId,
       dedupeKey: `lead-assigned:${key}`,
     });
-    if (previous && a.reason === 'MANUAL') {
+    if (previous && (a.reason === 'MANUAL' || a.reason === 'TRANSFER')) {
       await notify({
         userId: previous,
         type: 'LEAD_REASSIGNED',

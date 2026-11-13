@@ -13,17 +13,16 @@ const leadCount = async () => Number((await pool.query('SELECT count(*) FROM lea
 before(async () => {
   t = await startTestApp();
   const m = await t.manager('lead.mgr');
-  const teamA = (await t.call('/admin/teams', 'POST', { name: 'Mgr Team', managerId: m.id })).body;
-  const teamB = await t.team('Other Team');
-  mine = await t.exec('mine', teamA.id);
-  other = await t.exec('other', teamB.id);
+  const otherMgr = await t.manager('lead.other');
+  mine = await t.exec('mine', m.id);
+  other = await t.exec('other', otherMgr.id);
   prop = await t.property('Mgr Tower', [other.id]);
   mgr = t.asToken(await t.login('manager', 'lead.mgr@test.com', 'TempPass123'));
 });
 after(() => t.close());
 
 describe('manager creates a lead and assigns it', () => {
-  it('creates the lead already assigned to an executive of their team', async () => {
+  it('creates the lead already assigned to one of their executives', async () => {
     const res = await mgr('/manager/leads', 'POST', body({ executiveId: mine.id }));
     assert.equal(res.status, 201, JSON.stringify(res.body));
     assert.equal(res.body.assignedExecutive.id, mine.id);
@@ -36,7 +35,7 @@ describe('manager creates a lead and assigns it', () => {
   it('an executive must be chosen', async () => {
     assert.equal((await mgr('/manager/leads', 'POST', body({ mobile: '9811122244' }))).status, 400);
   });
-  it('refuses an executive outside their teams and saves nothing', async () => {
+  it('refuses an executive who is not theirs and saves nothing', async () => {
     const before = await leadCount();
     const res = await mgr('/manager/leads', 'POST', body({ mobile: '9811122255', executiveId: other.id }));
     assert.equal(res.status, 403);

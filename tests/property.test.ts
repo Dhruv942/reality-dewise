@@ -3,13 +3,12 @@ import assert from 'node:assert/strict';
 import { startTestApp, ZERO } from './helpers';
 
 let t: Awaited<ReturnType<typeof startTestApp>>;
-let team: any, amit: any, rahul: any;
+let amit: any, rahul: any;
 
 before(async () => {
   t = await startTestApp();
-  team = await t.team('Team A');
-  amit = await t.exec('amit', team.id);
-  rahul = await t.exec('rahul', team.id);
+  amit = await t.exec('amit');
+  rahul = await t.exec('rahul');
 });
 after(() => t.close());
 
@@ -82,7 +81,7 @@ describe('hand-picked executives', () => {
   const put = (body: unknown, id = p.id) => t.call(`/admin/properties/${id}/executives`, 'PUT', body);
 
   it('validation: unknown / inactive / admin user / bad ids / extra fields / property unknown', async () => {
-    const off = await t.exec('off.exec', team.id);
+    const off = await t.exec('off.exec');
     await t.setActive(off.id, false);
     assert.equal((await put({ executiveIds: [ZERO] })).status, 400);
     assert.equal((await put({ executiveIds: [off.id] })).status, 409);
@@ -90,7 +89,7 @@ describe('hand-picked executives', () => {
     assert.equal((await put({ executiveIds: [adminId] })).status, 400);
     assert.equal((await put({ executiveIds: ['x'] })).status, 400);
     assert.equal((await put({ executiveIds: 'x' })).status, 400);
-    assert.equal((await put({ executiveIds: [], team: 'x' })).status, 400);
+    assert.equal((await put({ executiveIds: [], extra: 'x' })).status, 400);
     assert.equal((await put({ executiveIds: [amit.id] }, ZERO)).status, 404);
   });
   it('setting executives assigns the waiting PENDING_ASSIGNMENT leads round-robin, oldest first', async () => {

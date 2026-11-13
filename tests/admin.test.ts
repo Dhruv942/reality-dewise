@@ -25,14 +25,15 @@ const call = async (path: string, method = 'GET', body?: unknown, token = adminT
 const login = async (portal: string, email: string, password: string) =>
   call(`/auth/${portal}/login`, 'POST', { email, password }, '');
 
-const newTeam = async (name: string) => (await call('/admin/teams', 'POST', { name })).body;
+const newManager = async (username: string) =>
+  (await call('/admin/managers', 'POST', { name: username, email: `${username}@test.com`, username, password: 'TempPass123' })).body;
 const newExec = async (username: string, extra: object = {}) =>
   (await call('/admin/executives', 'POST', {
     name: username, email: `${username}@test.com`, username, password: 'TempPass123', ...extra,
   })).body;
 
 before(async () => {
-  await pool.query('TRUNCATE users, teams CASCADE');
+  await pool.query('TRUNCATE users CASCADE');
   adminId = (await upsertByEmail({ name: 'Admin', email: 'admin@test.com', username: 'admin', passwordHash: await hashPassword('Admin-pass-123'), role: 'ADMIN' })).id;
   server = createApp().listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -44,69 +45,21 @@ describe('access control', () => {
   it('no token -> 401, SALES token -> 403 on admin routes', async () => {
     await newExec('gate');
     execToken = (await login('executive', 'gate@test.com', 'TempPass123')).body.accessToken;
-    for (const path of ['/admin/teams', '/admin/executives']) {
+    for (const path of ['/admin/managers', '/admin/executives']) {
       assert.equal((await call(path, 'GET', undefined, '')).status, 401);
       assert.equal((await call(path, 'GET', undefined, execToken)).status, 403);
     }
-    assert.equal((await call('/admin/teams', 'POST', { name: 'X' }, execToken)).status, 403);
-  });
-});
-
-describe('teams', () => {
-  let id: string;
-  it('create', async () => {
-    const r = await call('/admin/teams', 'POST', { name: 'Team A', description: 'Main Ahmedabad sales team' });
-    assert.equal(r.status, 201);
-    assert.equal(r.body.name, 'Team A');
-    assert.equal(r.body.isActive, true);
-    assert.equal(r.body.executiveCount, 0);
-    id = r.body.id;
-  });
-  it('list (with filter)', async () => {
-    await newTeam('Team B');
-    const all = await call('/admin/teams');
-    assert.deepEqual(all.body.map((t: any) => t.name), ['Team A', 'Team B']);
-    assert.equal((await call('/admin/teams?search=team%20b')).body.length, 1);
-    assert.equal((await call('/admin/teams?isActive=false')).body.length, 0);
-    assert.equal((await call('/admin/teams?isActive=maybe')).status, 400);
-  });
-  it('get single (with executives) / 404 / bad id', async () => {
-    const r = await call(`/admin/teams/${id}`);
-    assert.equal(r.status, 200);
-    assert.deepEqual(r.body.executives, []);
-    assert.equal((await call('/admin/teams/00000000-0000-0000-0000-000000000000')).status, 404);
-    assert.equal((await call('/admin/teams/not-a-uuid')).status, 400);
-  });
-  it('update', async () => {
-    const r = await call(`/admin/teams/${id}`, 'PATCH', { description: 'Updated', name: 'Team A1' });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.name, 'Team A1');
-    assert.equal(r.body.description, 'Updated');
-    assert.equal((await call(`/admin/teams/${id}`, 'PATCH', {})).status, 400);
-    await call(`/admin/teams/${id}`, 'PATCH', { name: 'Team A' });
-  });
-  it('duplicate name (case-insensitive) -> 409', async () => {
-    const r = await call('/admin/teams', 'POST', { name: 'team a' });
-    assert.equal(r.status, 409);
-    assert.equal(r.body.message, 'A team with this name already exists');
-    assert.equal((await call(`/admin/teams/${id}`, 'PATCH', { name: 'TEAM B' })).status, 409);
-  });
-  it('deactivate / reactivate', async () => {
-    const t = await newTeam('Team Z');
-    const r = await call(`/admin/teams/${t.id}/status`, 'PATCH', { isActive: false });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.isActive, false);
-    assert.equal((await call(`/admin/teams/${t.id}/status`, 'PATCH', { isActive: 'no' })).status, 400);
-    assert.equal((await call(`/admin/teams/${t.id}/status`, 'PATCH', { isActive: true })).body.isActive, true);
+    assert.equal((await call('/admin/teams', 'GET')).status, 404, 'the teams API no longer exists');
+    assert.equal((await call('/admin/managers', 'POST', { name: 'X' }, execToken)).status, 403);
   });
 });
 
 describe('executives', () => {
-  let teamA: string;
+  let mgrA: string;
   let amit: any;
-  before(async () => { teamA = (await call('/admin/teams')).body.find((t: any) => t.name === 'Team A').id; });
+  before(async () => { mgrA = (await newManager('mgr.a')).id; });
 
-  it('create without team', async () => {
+  it('create without manager', async () => {
     const r = await call('/admin/executives', 'POST', {
       name: 'Amit Patel', email: 'Amit@Test.com', phone: '9876543210', username: 'Amit.Patel', password: 'TempPassword123',
     });
@@ -117,30 +70,29 @@ describe('executives', () => {
     assert.equal(amit.role, 'SALES');
     assert.equal(amit.designation, 'SALES_EXECUTIVE');
     assert.equal(amit.isActive, true);
-    assert.equal(amit.team, null);
+    assert.equal(amit.manager, null);
     assert.ok(!JSON.stringify(amit).includes('password'));
   });
   it('created executive can log in', async () => {
     assert.equal((await login('executive', 'amit@test.com', 'TempPassword123')).status, 200);
   });
-  it('create with team', async () => {
-    const r = await newExec('rahul', { teamId: teamA });
-    assert.equal(r.team.id, teamA);
-    assert.equal(r.team.name, 'Team A');
+  it('create with manager', async () => {
+    const r = await newExec('rahul', { managerId: mgrA });
+    assert.deepEqual(r.manager, { id: mgrA, name: 'mgr.a', isActive: true });
   });
-  it('rejects role in body / weak password / bad teamId', async () => {
+  it('rejects role in body / weak password / bad managerId', async () => {
     const base = { name: 'X', email: 'x@test.com', username: 'xxx', password: 'TempPass123' };
     assert.equal((await call('/admin/executives', 'POST', { ...base, role: 'ADMIN' })).status, 400);
     assert.equal((await call('/admin/executives', 'POST', { ...base, password: 'short' })).status, 400);
-    assert.equal((await call('/admin/executives', 'POST', { ...base, teamId: 'nope' })).status, 400);
+    assert.equal((await call('/admin/executives', 'POST', { ...base, managerId: 'nope' })).status, 400);
   });
-  it('create with non-existing team -> 400, inactive team -> 409', async () => {
+  it('create with non-existing / non-manager / inactive manager -> 400 / 400 / 409, nothing half-created', async () => {
     const base = { name: 'X', email: 'x@test.com', username: 'xxx', password: 'TempPass123' };
-    assert.equal((await call('/admin/executives', 'POST', { ...base, teamId: '00000000-0000-0000-0000-000000000000' })).status, 400);
-    const t = await newTeam('Dormant');
-    await call(`/admin/teams/${t.id}/status`, 'PATCH', { isActive: false });
-    assert.equal((await call('/admin/executives', 'POST', { ...base, teamId: t.id })).status, 409);
-    // nothing half-created
+    assert.equal((await call('/admin/executives', 'POST', { ...base, managerId: '00000000-0000-0000-0000-000000000000' })).status, 400);
+    assert.equal((await call('/admin/executives', 'POST', { ...base, managerId: amit.id })).status, 400, 'a sales user is not a manager');
+    const dormant = await newManager('mgr.dormant');
+    await call(`/admin/managers/${dormant.id}/status`, 'PATCH', { isActive: false });
+    assert.equal((await call('/admin/executives', 'POST', { ...base, managerId: dormant.id })).status, 409);
     assert.equal((await call('/admin/executives?search=xxx')).body.length, 0);
   });
   it('duplicate username / email / phone -> 409', async () => {
@@ -153,13 +105,13 @@ describe('executives', () => {
   it('get single / 404 / admin id is not an executive', async () => {
     const r = await call(`/admin/executives/${amit.id}`);
     assert.equal(r.status, 200);
-    assert.equal(r.body.team, null);
+    assert.equal(r.body.manager, null);
     assert.equal((await call('/admin/executives/00000000-0000-0000-0000-000000000000')).status, 404);
     assert.equal((await call(`/admin/executives/${adminId}`)).status, 400);
   });
   it('list + filters', async () => {
     assert.ok(!(await call('/admin/executives')).body.some((e: any) => e.role !== 'SALES'), 'admins never listed');
-    assert.deepEqual((await call(`/admin/executives?teamId=${teamA}`)).body.map((e: any) => e.username), ['rahul']);
+    assert.deepEqual((await call(`/admin/executives?managerId=${mgrA}`)).body.map((e: any) => e.username), ['rahul']);
     assert.equal((await call('/admin/executives?search=9876543')).body[0].username, 'amit.patel');
     assert.equal((await call('/admin/executives?isActive=false')).body.length, 0);
     assert.equal((await call('/admin/executives?search=%25')).body.length, 0, 'LIKE wildcards are escaped');
@@ -174,8 +126,9 @@ describe('executives', () => {
       assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', bad)).status, 400);
     }
     assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', { email: 'rahul@test.com' })).status, 409);
-    assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', { teamId: teamA })).body.team.name, 'Team A');
-    assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', { teamId: null })).body.team, null);
+    assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', { managerId: mgrA })).body.manager.name, 'mgr.a');
+    assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', { managerId: null })).body.manager, null);
+    assert.equal((await call(`/admin/executives/${amit.id}`, 'PATCH', { teamId: mgrA })).status, 400, 'teamId is gone');
   });
   it('change password', async () => {
     const r = await call(`/admin/executives/${amit.id}/password`, 'PATCH', { password: 'NewPassword123' });
@@ -212,85 +165,67 @@ describe('executives', () => {
   });
 });
 
-describe('team assignment', () => {
-  let team: string;
+describe('manager assignment', () => {
+  let mgr: any;
   let priya: any;
   before(async () => {
-    team = (await newTeam('Assign Team')).id;
+    mgr = await newManager('mgr.assign');
     priya = await newExec('priya');
   });
 
-  it('assign -> team shows executive, executive shows team', async () => {
-    const r = await call(`/admin/executives/${priya.id}/team`, 'PATCH', { teamId: team });
+  it('assign -> executive shows manager, manager detail lists the executive', async () => {
+    const r = await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: mgr.id });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.team, { id: team, name: 'Assign Team', isActive: true });
-    assert.equal((await call(`/admin/executives/${priya.id}`)).body.team.id, team);
-    const t = await call(`/admin/teams/${team}/executives`);
-    assert.deepEqual(t.body.team, { id: team, name: 'Assign Team' });
-    assert.deepEqual(t.body.executives.map((e: any) => e.username), ['priya']);
-    assert.equal(t.body.executives[0].isActive, true);
-    assert.equal((await call(`/admin/teams/${team}`)).body.executiveCount, 1);
+    assert.deepEqual(r.body.manager, { id: mgr.id, name: 'mgr.assign', isActive: true });
+    const m = await call(`/admin/managers/${mgr.id}`);
+    assert.deepEqual(m.body.executives.map((e: any) => e.username), ['priya']);
+    assert.equal(m.body.manager, null, 'a manager has no manager');
+    assert.deepEqual((await call(`/admin/executives?managerId=${mgr.id}`)).body.map((e: any) => e.username), ['priya']);
   });
-  it('full flow: 3 executives in one team, deactivating one drops the active count only', async () => {
-    const amit = (await call('/admin/executives?search=amit')).body[0];
-    const rahul = (await call('/admin/executives?search=rahul')).body[0];
-    for (const e of [amit, rahul]) await call(`/admin/executives/${e.id}/team`, 'PATCH', { teamId: team });
-    const t = await call(`/admin/teams/${team}`);
-    assert.equal(t.body.executives.length, 3);
-    assert.equal(t.body.executiveCount, 3);
-    await call(`/admin/executives/${rahul.id}/status`, 'PATCH', { isActive: false });
-    const after = await call(`/admin/teams/${team}`);
-    assert.equal(after.body.executives.length, 3, 'still a member');
-    assert.equal(after.body.executiveCount, 2, 'but not counted as active');
-    assert.equal((await login('executive', 'rahul@test.com', 'TempPass123')).status, 401);
+  it('reassigning moves the executive to the other manager', async () => {
+    const other = await newManager('mgr.other');
+    assert.equal((await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: other.id })).body.manager.id, other.id);
+    assert.equal((await call(`/admin/managers/${mgr.id}`)).body.executives.length, 0);
+    await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: mgr.id });
   });
-  it('assign inactive executive -> 409', async () => {
-    const rahul = (await call('/admin/executives?search=rahul')).body[0];
-    const t2 = await newTeam('Other');
-    const r = await call(`/admin/executives/${rahul.id}/team`, 'PATCH', { teamId: t2.id });
+  it('inactive executive -> 409; inactive / unknown / non-manager target -> 409 / 400 / 400; bad body -> 400', async () => {
+    const off = await newExec('off.exec');
+    await call(`/admin/executives/${off.id}/status`, 'PATCH', { isActive: false });
+    const r = await call(`/admin/executives/${off.id}/manager`, 'PATCH', { managerId: mgr.id });
     assert.equal(r.status, 409);
     assert.equal(r.body.message, 'Executive is inactive');
+    const off2 = await newManager('mgr.off');
+    await call(`/admin/managers/${off2.id}/status`, 'PATCH', { isActive: false });
+    const to = await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: off2.id });
+    assert.equal(to.status, 409);
+    assert.equal(to.body.message, 'Manager is inactive');
+    assert.equal((await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: '00000000-0000-0000-0000-000000000000' })).status, 400);
+    assert.equal((await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: adminId })).status, 400);
+    assert.equal((await call(`/admin/executives/${priya.id}/manager`, 'PATCH', {})).status, 400);
+    assert.equal((await call(`/admin/executives/${priya.id}`)).body.manager.id, mgr.id, 'unchanged');
   });
-  it('assign to inactive team -> 409', async () => {
-    const t = await newTeam('Closed');
-    await call(`/admin/teams/${t.id}/status`, 'PATCH', { isActive: false });
-    const r = await call(`/admin/executives/${priya.id}/team`, 'PATCH', { teamId: t.id });
-    assert.equal(r.status, 409);
-    assert.equal(r.body.message, 'Team is inactive');
-    assert.equal((await call(`/admin/executives/${priya.id}`)).body.team.id, team, 'unchanged');
-  });
-  it('assign to non-existing team -> 400; bad body -> 400', async () => {
-    assert.equal((await call(`/admin/executives/${priya.id}/team`, 'PATCH', { teamId: '00000000-0000-0000-0000-000000000000' })).status, 400);
-    assert.equal((await call(`/admin/executives/${priya.id}/team`, 'PATCH', {})).status, 400);
-  });
-  it('assign non-sales user (admin) -> rejected, and DB constraint backs it up', async () => {
-    const r = await call(`/admin/executives/${adminId}/team`, 'PATCH', { teamId: team });
+  it('only sales users have a manager: admin and manager targets are rejected, and the DB backs it up', async () => {
+    const r = await call(`/admin/executives/${adminId}/manager`, 'PATCH', { managerId: mgr.id });
     assert.equal(r.status, 400);
     assert.equal(r.body.message, 'User is not an executive');
-    await assert.rejects(pool.query('UPDATE users SET team_id=$1 WHERE id=$2', [team, adminId]), /users_team_only_executives_check/);
+    await assert.rejects(pool.query('UPDATE users SET manager_id=$1 WHERE id=$2', [mgr.id, adminId]), /users_manager_only_for_sales_check/);
+    assert.equal((await call(`/admin/managers/${mgr.id}`, 'PATCH', { managerId: mgr.id })).status, 400);
   });
-  it('assign unknown executive -> 404', async () => {
-    assert.equal((await call(`/admin/executives/00000000-0000-0000-0000-000000000000/team`, 'PATCH', { teamId: team })).status, 404);
+  it('unknown executive -> 404', async () => {
+    assert.equal((await call(`/admin/executives/00000000-0000-0000-0000-000000000000/manager`, 'PATCH', { managerId: mgr.id })).status, 404);
   });
-  it('team deactivation keeps membership (documented behaviour)', async () => {
-    await call(`/admin/teams/${team}/status`, 'PATCH', { isActive: false });
-    const e = await call(`/admin/executives/${priya.id}`);
-    assert.equal(e.body.team.id, team);
-    assert.equal(e.body.team.isActive, false);
-    assert.equal((await call(`/admin/teams/${team}/executives`)).body.executives.length, 3);
-    await call(`/admin/teams/${team}/status`, 'PATCH', { isActive: true });
+  it('a manager with executives cannot be hard-deleted; soft-deleting releases them (account and history kept)', async () => {
+    await assert.rejects(pool.query('DELETE FROM users WHERE id=$1', [mgr.id]), /users_manager_id_fkey/);
+    assert.equal((await call(`/admin/managers/${mgr.id}`, 'DELETE')).status, 200);
+    assert.equal((await call(`/admin/executives/${priya.id}`)).body.manager, null);
   });
-  it('teams cannot be hard-deleted while executives reference them', async () => {
-    await assert.rejects(pool.query('DELETE FROM teams WHERE id=$1', [team]), /users_team_id_fkey/);
-  });
-  it('remove from team -> team_id NULL, account kept', async () => {
-    const r = await call(`/admin/executives/${priya.id}/team`, 'DELETE');
+  it('remove manager -> manager_id NULL, account kept; repeating is a no-op', async () => {
+    const m2 = await newManager('mgr.remove');
+    await call(`/admin/executives/${priya.id}/manager`, 'PATCH', { managerId: m2.id });
+    const r = await call(`/admin/executives/${priya.id}/manager`, 'DELETE');
     assert.equal(r.status, 200);
-    assert.equal(r.body.team, null);
+    assert.equal(r.body.manager, null);
     assert.equal(r.body.isActive, true);
-    const t = await call(`/admin/teams/${team}/executives`);
-    assert.ok(!t.body.executives.some((e: any) => e.username === 'priya'));
-    // removing again is a harmless no-op
-    assert.equal((await call(`/admin/executives/${priya.id}/team`, 'DELETE')).status, 200);
+    assert.equal((await call(`/admin/executives/${priya.id}/manager`, 'DELETE')).status, 200);
   });
 });

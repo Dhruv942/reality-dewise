@@ -1,9 +1,9 @@
 import { pool } from '../../database/pool';
 import { patchRow } from '../../database/patch';
 import type { Db } from '../../database/transaction';
-import { escapeLike } from '../teams/team.repository';
+import { escapeLike } from '../../utils/like';
 import type { PropertySource } from '../properties/property.model';
-import type { EnquiryType, LeadRow, LeadStatus } from './lead.model';
+import type { EnquiryType, LeadRow, LeadStatus, StatusReasonCode } from './lead.model';
 
 export const LEAD_EXTERNAL_UNIQUE = 'leads_source_external_lead_id_key';
 
@@ -12,7 +12,7 @@ const IMPORTANT = (viewer: string) =>
   `EXISTS (SELECT 1 FROM lead_important li WHERE li.lead_id = l.id AND li.user_id = ${viewer}::uuid)`;
 
 const select = (viewer: string) => `
-  SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.message, l.requirement, l.enquiry_type, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.source, l.created_at, l.updated_at,
+  SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.status_reason, l.status_reason_other, l.message, l.requirement, l.enquiry_type, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.source, l.created_at, l.updated_at,
          l.follow_up_at, l.follow_up_note, l.follow_up_updated_by, fu.name AS follow_up_updated_by_name, l.follow_up_updated_at,
          c.id AS customer_id, c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email,
          p.id AS property_id, p.name AS property_name, p.location AS property_location,
@@ -25,12 +25,12 @@ const select = (viewer: string) => `
   LEFT JOIN users fu ON fu.id = l.follow_up_updated_by`;
 
 /**
- * A manager sees the leads of the sales users in the teams they lead, plus leads nobody has been assigned yet
- * (so they can pick an executive from their team for them).
+ * A manager sees the leads of the sales users who report to them (users.manager_id), plus leads nobody has been
+ * assigned yet (so they can pick one of their executives for them).
  */
 const managerScope = (param: string) =>
   `(l.status = 'PENDING_ASSIGNMENT' OR l.assigned_executive_id IN (
-      SELECT u.id FROM users u JOIN teams t ON t.id = u.team_id WHERE t.manager_id = ${param}))`;
+      SELECT u.id FROM users u WHERE u.manager_id = ${param}))`;
 
 /** `ownerId` scopes the lookup to one executive's leads, `managerId` to one manager's scope (others look like "not found"). */
 export async function findById(id: string, ownerId?: string, managerId?: string, viewerId?: string): Promise<LeadRow | null> {
@@ -59,9 +59,10 @@ export async function findByExternalId(
 
 export interface LeadFilters {
   status?: LeadStatus;
+  statusReason?: StatusReasonCode;
   propertyId?: string;
   executiveId?: string;
-  /** A manager's view: their teams' leads plus unassigned ones. */
+  /** A manager's view: their executives' leads plus unassigned ones. */
   managerId?: string;
   customerId?: string;
   search?: string;
@@ -88,6 +89,7 @@ export async function list(f: LeadFilters): Promise<LeadRow[]> {
   const viewer = `$${params.push(f.viewerId ?? null)}`;
   if (f.important !== undefined) where.push(f.important ? IMPORTANT(viewer) : `NOT ${IMPORTANT(viewer)}`);
   if (f.status) where.push(`l.status = $${params.push(f.status)}`);
+  if (f.statusReason) where.push(`l.status_reason = $${params.push(f.statusReason)}`);
   if (f.propertyId) where.push(`l.property_id = $${params.push(f.propertyId)}`);
   if (f.executiveId) where.push(`l.assigned_executive_id = $${params.push(f.executiveId)}`);
   if (f.managerId) where.push(managerScope(`$${params.push(f.managerId)}`));
@@ -169,8 +171,15 @@ export async function lockForStatus(db: Db, id: string, ownerId?: string): Promi
   return (await db.query(`${sql} FOR UPDATE`, params)).rows[0] ?? null;
 }
 
-export const setStatusIn = (db: Db, id: string, status: LeadStatus) =>
-  db.query('UPDATE leads SET status = $2 WHERE id = $1', [id, status]);
+export async function lockForTransfer(db: Db, id: string, managerId?: string): Promise<{ property_id: string; executive_id: string | null } | null> {
+  const params: unknown[] = [id];
+  let sql = `SELECT l.property_id, l.assigned_executive_id AS executive_id FROM leads l WHERE l.id = $1`;
+  if (managerId) sql += ` AND ${managerScope(`$${params.push(managerId)}`)}`;
+  return (await db.query(`${sql} FOR UPDATE`, params)).rows[0] ?? null;
+}
+
+export const setStatusIn = (db: Db, id: string, status: LeadStatus, reason: StatusReasonCode | null, otherReason: string | null) =>
+  db.query('UPDATE leads SET status = $2, status_reason = $3, status_reason_other = $4 WHERE id = $1', [id, status, reason, otherReason]);
 
 /** Milliseconds (database clock) until the earliest INCOMING lead's SLA runs out; null when none is running. */
 export async function msUntilNextTimeout(minutes: number): Promise<number | null> {
@@ -210,6 +219,15 @@ export async function summaryFor(executiveId: string) {
     `SELECT status, count(*)::int AS total, count(*) FILTER (WHERE seen_at IS NULL)::int AS unseen
      FROM leads WHERE assigned_executive_id = $1 GROUP BY status`,
     [executiveId],
+  );
+  return rows;
+}
+
+/** Lead counts per status inside one manager's scope (their executives' leads plus unassigned ones). */
+export async function summaryForManager(managerId: string) {
+  const { rows } = await pool.query<{ status: LeadStatus; total: number }>(
+    `SELECT l.status, count(*)::int AS total FROM leads l WHERE ${managerScope('$1')} GROUP BY l.status`,
+    [managerId],
   );
   return rows;
 }

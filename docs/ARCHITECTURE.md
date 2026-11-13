@@ -11,6 +11,7 @@ HTTP request
   → /api/v1/admin/*       authenticate() → authorizeRoles('ADMIN')      → module routers
   → /api/v1/manager/*     authenticate() → authorizeRoles('MANAGER')    → module routers
   → /api/v1/executive/*   authenticate() → authorizeRoles('SALES')      → module routers
+  → /api/v1/notes         authenticate()  (own personal notes only; all roles)
   → route:   validateBody(zodSchema)  → controller → service → repository → Postgres
   → errors:  notFoundHandler → errorHandler  (always JSON, never leaks SQL)
 ```
@@ -19,7 +20,7 @@ HTTP request
 - **Errors:** services throw `AppError(status, message, details?)` or `NotFoundError`. `errorHandler` turns them into `{ success:false, message, errors? }`. It also maps Postgres constraint violations: unique → `409` (friendly text per constraint in `UNIQUE_MESSAGES`), foreign key → `409`, not-null/check/invalid → `400`. Anything else is a generic `500`.
 - **Validation:** Zod schemas live in `*.validation.ts`. Bodies use `z.strictObject`, so **unknown fields are rejected** (`400`). Query strings are parsed with `parse(schema, req.query)`.
 - **Roles and users:** `ADMIN`, `MANAGER`, `SALES` (`user_role`). `users.designation` (`MANAGER`, `SALES_EXECUTIVE`, `EXECUTIVE_MANAGER`) is a label only; a database check ties it to the role. Sales Executive and Executive Manager are one role, so no code branches on the designation. Admins create all accounts; the executives service is one implementation parameterised by role, used for both `/admin/executives` (SALES) and `/admin/managers` (MANAGER).
-- **Teams and managers:** `teams.manager_id` points at the manager who leads the team; sales users join through `users.team_id`. A manager's reach is derived from it: *their* sales users = members of teams where `manager_id` is them.
+- **Managers and their executives:** a sales user points straight at their manager through `users.manager_id` (only SALES users have one; admins set it on the executive, and a manager never has a manager). A manager's reach is derived from it: *their* sales users = users where `manager_id` is them. There are no teams. A manager may edit only their own executives' part of a property's rotation list.
 - **Auth:** each role signs in through its own endpoint (admin, manager, executive) with email or username, and gets a JWT carrying the role. The role guard rejects the wrong role with `403`. Passwords are hashed with argon2. `users.password_changed_at` invalidates tokens issued before a password change. There are no refresh tokens (1 h expiry).
 - **Soft delete:** executives are never hard-deleted (`users.deleted_at`). History (leads, assignments) keeps pointing at them.
 
@@ -43,10 +44,14 @@ PostgreSQL, SQL migrations in `migrations/` (applied in numeric order, tracked i
 | 012 | `app_settings` (key/value), seeded with `assignment_rule = ROUND_ROBIN` |
 | 013 | `lead_timeout_minutes` setting, `assignment_method` gains `TIMEOUT`, partial index `leads_timeout_idx` |
 | 014 | the lead SLA default becomes 90 minutes (installs where no admin had saved a value; a saved value is kept) |
+| 020 | removes teams: adds `users.manager_id` (copied from `teams.manager_id` via `users.team_id`), drops `teams` and `users.team_id`; the old team rows are kept in `legacy_teams` / `legacy_team_members` (unused by the app, droppable) and the down migration rebuilds teams from them |
+| 021 | `personal_notes`: private notepad per user (`user_id` CASCADE); admins and managers cannot read another user's notes |
+| 022 | lead transfers: `TRANSFER` assignment history, optional reason, and `TRANSFERRED` activity type |
+| 023 | adds the `INVALID` lead status and persisted `LOST`/`INVALID` status reasons, including a 20-character custom `OTHER` value |
 
 ```mermaid
 erDiagram
-  teams ||--o{ users : "has executives"
+  users ||--o{ users : "manager of executives"
   customers ||--o{ leads : "makes enquiries"
   properties ||--o{ leads : "is asked about"
   users ||--o{ leads : "assigned executive"
@@ -56,8 +61,7 @@ erDiagram
   properties ||--o{ property_assignment_history : ""
   leads ||--o| property_assignment_history : "one assignment per lead"
 
-  users { uuid id PK  text email  text username  user_role role  bool is_active  uuid team_id FK  timestamptz deleted_at }
-  teams { uuid id PK  text name  bool is_active }
+  users { uuid id PK  text email  text username  user_role role  bool is_active  uuid manager_id FK  timestamptz deleted_at }
   customers { uuid id PK  text name  text mobile "UNIQUE, +E.164"  text email }
   properties { uuid id PK  text name  text name_key "UNIQUE, generated"  bool is_active  bool is_stub }
   property_executives { uuid property_id PK  uuid executive_id PK }
@@ -89,7 +93,7 @@ One database **transaction** covers everything, so a lead is never stored half-p
 6. Assigned → `markAssigned` sets `status = INCOMING`, `assigned_at = now()`, `seen_at = NULL`. Nobody available → the lead stays `PENDING_ASSIGNMENT` and the response carries a `notice`.
 7. An **inactive property** rejects the lead with `409` and the transaction rolls back (nothing is stored).
 
-**Manual assignment** (`lead.service.ts → assignLead`, `PATCH /admin/leads/:id/assign` and `PATCH /manager/leads/:id/assign`): an admin may give any lead to any active SALES user; a manager only leads in their scope (their teams' leads plus `PENDING_ASSIGNMENT` ones) and only to SALES users of teams they lead. It reassigns the lead, resets `assigned_at`/`seen_at` so it is "new" for the receiver, moves a pending lead to `INCOMING` (other statuses are kept), and writes a `MANUAL` history row with `assigned_by_id`. It does not touch the round-robin pointer. The "one assignment per lead" unique index applies to `ROUND_ROBIN` rows only.
+**Manual assignment** (`lead.service.ts → assignLead`, `PATCH /admin/leads/:id/assign` and `PATCH /manager/leads/:id/assign`): an admin may give any lead to any active SALES user; a manager only leads in their scope (their executives' leads plus `PENDING_ASSIGNMENT` ones) and only to SALES users whose `manager_id` is them (otherwise 403). It reassigns the lead, resets `assigned_at`/`seen_at` so it is "new" for the receiver, moves a pending lead to `INCOMING` (other statuses are kept), and writes a `MANUAL` history row with `assigned_by_id`. It does not touch the round-robin pointer. The "one assignment per lead" unique index applies to `ROUND_ROBIN` rows only.
 
 **When an admin sets a property's executives** (`PUT /admin/properties/:id/executives`), the list is replaced and `assignPendingLeads` assigns that property's waiting leads, oldest first, through the same round-robin, in the same transaction.
 

@@ -11,6 +11,17 @@ export const loginAs =
     res.json(await authService.login(role, { email, username }, password));
   };
 
+/** One login for every role: the role comes from the user's record, never from the request. */
+export const loginAuto = async (req: Request, res: Response): Promise<void> => {
+  const { email, username, password } = req.body as LoginInput;
+  res.json(await authService.login(undefined, { email, username }, password));
+};
+
+/** Renews the session from a refresh token (the portal keeps it in an httpOnly cookie). */
+export const refresh = async (req: Request, res: Response): Promise<void> => {
+  res.json(await authService.refresh((req.body as { refreshToken: string }).refreshToken));
+};
+
 export const me = (req: Request, res: Response): void => {
   if (!req.user) throw new UnauthorizedError();
   res.json(req.user);

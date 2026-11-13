@@ -5,7 +5,7 @@ import { normalizeMobile } from '../src/utils/mobile';
 import { startTestApp, ZERO } from './helpers';
 
 let t: Awaited<ReturnType<typeof startTestApp>>;
-let team: any, amit: any, rahul: any, priya: any, prop: any, prop2: any;
+let amit: any, rahul: any, priya: any, prop: any, prop2: any;
 let amitCall: ReturnType<typeof t.asToken>;
 let rahulCall: ReturnType<typeof t.asToken>;
 
@@ -14,10 +14,9 @@ const enquire = (extra: object = {}) =>
 
 before(async () => {
   t = await startTestApp();
-  team = await t.team('Team A');
-  amit = await t.exec('amit', team.id);
-  rahul = await t.exec('rahul', team.id);
-  priya = await t.exec('priya', team.id);
+  amit = await t.exec('amit');
+  rahul = await t.exec('rahul');
+  priya = await t.exec('priya');
   prop = await t.property('XYZ Residency', [amit.id, rahul.id, priya.id]);
   prop2 = await t.property('ABC Heights', [rahul.id]);
   amitCall = t.asToken(await t.login('executive', 'amit@test.com', 'TempPass123'));
@@ -104,7 +103,7 @@ describe('property without executives: stub + PENDING_ASSIGNMENT', () => {
     assert.equal(r.status, 201);
     assert.equal(r.body.status, 'PENDING_ASSIGNMENT');
     assert.equal(r.body.assignedExecutive, null);
-    assert.equal(r.body.notice, 'No executive/team is assigned to Green Valley Residency. Please assign an executive/team before processing this lead.');
+    assert.equal(r.body.notice, 'No executive is assigned to Green Valley Residency. Please assign an executive before processing this lead.');
     const props = (await t.call('/admin/properties?search=green')).body;
     assert.equal(props.length, 1);
     assert.equal(props[0].isStub, true);

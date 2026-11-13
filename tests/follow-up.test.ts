@@ -20,9 +20,8 @@ const force = (id: string, at: string | null) => pool.query('UPDATE leads SET fo
 before(async () => {
   t = await startTestApp();
   mgr = await t.manager('fu.mgr');
-  const teamA = (await t.call('/admin/teams', 'POST', { name: 'FU Team', managerId: mgr.id })).body;
   outsider = await t.manager('fu.out');
-  amit = await t.exec('fu.amit', teamA.id);
+  amit = await t.exec('fu.amit', mgr.id);
   rahul = await t.exec('fu.rahul');
   await t.property('FU Towers', [amit.id]);
   await t.property('FU Other', [rahul.id]);
@@ -125,11 +124,11 @@ describe('follow-up: permissions', () => {
     assert.equal((await row(theirs.id)).follow_up_updated_by !== amit.id, true);
   });
 
-  it('a manager is limited to their team scope; an outsider manager cannot touch the team\'s lead', async () => {
+  it('a manager is limited to their own executives; an outsider manager cannot touch their lead', async () => {
     assert.equal((await mgrCall(`/manager/leads/${mine.id}/follow-up`, 'PUT', { followUpAt: inHours(9) })).status, 200);
     assert.equal((await outCall(`/manager/leads/${mine.id}/follow-up`, 'PUT', { followUpAt: inHours(9) })).status, 404);
     assert.equal((await outCall(`/manager/leads/${mine.id}/follow-up`, 'DELETE')).status, 404);
-    // a lead in a team they don't lead
+    // a lead of an executive who is not theirs
     assert.equal((await mgrCall(`/manager/leads/${theirs.id}/follow-up`, 'PUT', { followUpAt: inHours(9) })).status, 404);
   });
 

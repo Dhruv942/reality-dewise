@@ -15,9 +15,9 @@ const flagIn = (list: any[], id: string) => list.find((l) => l.id === id)?.isImp
 
 before(async () => {
   t = await startTestApp();
-  const teamA = (await (async () => { mgr = await t.manager('imp.mgr'); return t.call('/admin/teams', 'POST', { name: 'Imp Team', managerId: mgr.id }); })()).body;
+  mgr = await t.manager('imp.mgr');
   outsider = await t.manager('imp.out');
-  amit = await t.exec('imp.amit', teamA.id);
+  amit = await t.exec('imp.amit', mgr.id);
   rahul = await t.exec('imp.rahul');
   await t.property('Imp Towers', [amit.id]);
   await t.property('Imp Other', [rahul.id]);
@@ -128,11 +128,11 @@ describe('important lead: access rules', () => {
     assert.equal((await pool.query('SELECT count(*)::int n FROM lead_important WHERE lead_id=$1', [theirs.id])).rows[0].n, 0);
     assert.equal((await rahulCall(`/executive/leads/${theirs.id}/important`, 'POST')).body.isImportant, true);
   });
-  it('a manager can mark leads in their scope (their team or unassigned) but not other teams\' leads', async () => {
+  it('a manager can mark leads in their scope (their executives\' or unassigned) but not other executives\' leads', async () => {
     assert.equal((await mgrCall(`/manager/leads/${mine.id}/important`, 'POST')).body.isImportant, true);
     assert.equal((await mgrCall(`/manager/leads/${pending.id}/important`, 'POST')).body.isImportant, true, 'unassigned lead');
-    assert.equal((await mgrCall(`/manager/leads/${theirs.id}/important`, 'POST')).status, 404, "another team's lead");
-    assert.equal((await outCall(`/manager/leads/${mine.id}/important`, 'POST')).status, 404, 'manager without that team');
+    assert.equal((await mgrCall(`/manager/leads/${theirs.id}/important`, 'POST')).status, 404, "another manager's executive's lead");
+    assert.equal((await outCall(`/manager/leads/${mine.id}/important`, 'POST')).status, 404, 'manager who does not look after that executive');
     assert.deepEqual((await mgrCall('/manager/leads?important=true&limit=200')).body.map((l: any) => l.id).sort(), [mine.id, pending.id].sort());
     assert.equal(flagIn((await amitCall('/executive/leads')).body, pending.id) ?? false, false);
   });

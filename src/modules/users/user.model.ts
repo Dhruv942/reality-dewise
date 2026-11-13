@@ -1,4 +1,4 @@
-/** ADMIN manages everything; MANAGER leads teams and assigns leads to them; SALES works leads. */
+/** ADMIN manages everything; MANAGER looks after their own sales users (users.manager_id) and assigns leads to them; SALES works leads. */
 export const USER_ROLES = ['ADMIN', 'MANAGER', 'SALES'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
@@ -21,7 +21,7 @@ export interface UserRecord {
   role: UserRole;
   designation: UserDesignation | null;
   is_active: boolean;
-  team_id: string | null;
+  manager_id: string | null;
   deleted_at: Date | null;
   password_changed_at: Date | null;
   created_at: Date;

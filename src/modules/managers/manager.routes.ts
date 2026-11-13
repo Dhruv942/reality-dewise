@@ -5,7 +5,8 @@ import { createManagerSchema, passwordSchema, statusSchema, updateManagerSchema 
 
 /**
  * Admin-only management of manager accounts. Same behaviour as /admin/executives (they share one service),
- * minus team membership: a manager leads teams, set through the team's `managerId`.
+ * minus a manager of their own: a manager looks after the sales users whose `managerId` points at them
+ * (set on the executive: POST/PATCH /admin/executives or PATCH /admin/executives/:id/manager).
  */
 export const managerRouter = Router();
 

@@ -231,11 +231,10 @@ describe('timeout: manual reassignment resets the timer', () => {
   });
   it('a manager reassigning also restarts the timer', async () => {
     const mgr = (await t.call('/admin/managers')).body[0];
-    const team = (await t.call('/admin/teams', 'POST', { name: 'Timeout Team', managerId: mgr.id })).body;
-    await t.call(`/admin/executives/${a.id}/team`, 'PATCH', { teamId: team.id });
-    await t.call(`/admin/executives/${b.id}/team`, 'PATCH', { teamId: team.id });
+    await t.call(`/admin/executives/${a.id}/manager`, 'PATCH', { managerId: mgr.id });
+    await t.call(`/admin/executives/${b.id}/manager`, 'PATCH', { managerId: mgr.id });
     const p = await t.property('Manager Reset Mews', [a.id, c.id]);
-    const l = await lead(p.name); // a: a member of the manager's team
+    const l = await lead(p.name); // a: one of the manager's executives
     await backdate(l.id, 120);
     assert.equal((await mgrCall(`/manager/leads/${l.id}/assign`, 'PATCH', { executiveId: b.id })).status, 200);
     assert.equal((await runLeadTimeoutSweep()).reassigned, 0);

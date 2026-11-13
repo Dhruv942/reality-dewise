@@ -1,7 +1,11 @@
 import type { PropertySource } from '../properties/property.model';
 
-export const LEAD_STATUSES = ['PENDING_ASSIGNMENT', 'INCOMING', 'RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'BROKER'] as const;
+export const LEAD_STATUSES = ['PENDING_ASSIGNMENT', 'INCOMING', 'RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'INVALID', 'BROKER'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
+export const INVALID_REASONS = ['NO_REQUIREMENT', 'NOT_ABLE_TO_CONNECT', 'OUT_OF_SERVICE_AREA', 'OTHER'] as const;
+export const LOST_REASONS = ['BUDGET_ISSUE', 'NOT_RESPONDING_PREVIOUSLY_CONNECTED', 'BOOKED_OTHER_CHANNEL', 'CHANGED_OR_DIFFERED_PLAN', 'OTHER'] as const;
+export const STATUS_REASONS = ['NO_REQUIREMENT', 'NOT_ABLE_TO_CONNECT', 'OUT_OF_SERVICE_AREA', 'BUDGET_ISSUE', 'NOT_RESPONDING_PREVIOUSLY_CONNECTED', 'BOOKED_OTHER_CHANNEL', 'CHANGED_OR_DIFFERED_PLAN', 'OTHER'] as const;
+export type StatusReasonCode = (typeof INVALID_REASONS)[number] | (typeof LOST_REASONS)[number];
 /** Statuses a person may set. PENDING_ASSIGNMENT is system-managed: it ends when an executive is assigned. */
 export const PIPELINE_STATUSES = LEAD_STATUSES.filter((s) => s !== 'PENDING_ASSIGNMENT') as Exclude<LeadStatus, 'PENDING_ASSIGNMENT'>[];
 
@@ -11,6 +15,8 @@ export type EnquiryType = (typeof ENQUIRY_TYPES)[number];
 export interface LeadRow {
   id: string;
   status: LeadStatus;
+  status_reason: StatusReasonCode | null;
+  status_reason_other: string | null;
   message: string | null;
   is_important: boolean; // the viewing user's own flag
   lead_no: string; // bigint comes back from pg as a string
@@ -73,6 +79,7 @@ export const toLeadDto = (l: LeadRow, tz = 'UTC') => ({
   // Per user: true only if the logged-in user marked this lead important. Never reflects anyone else's flag.
   isImportant: l.is_important,
   status: l.status,
+  statusReason: l.status_reason ? { code: l.status_reason, other: l.status_reason_other } : null,
   message: l.message,
   requirement: l.requirement,
   // Whether the client wants to rent or buy. null when the enquiry did not say.

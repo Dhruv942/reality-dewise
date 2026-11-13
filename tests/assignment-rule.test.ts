@@ -150,7 +150,7 @@ describe('pending assignment still works with the rule in place', () => {
     const p = await t.property('Pending Palms');
     const waiting = [(await lead(p.name)).body, (await lead(p.name)).body, (await lead(p.name)).body];
     assert.ok(waiting.every((l) => l.status === 'PENDING_ASSIGNMENT' && l.assignedExecutive === null));
-    assert.match(waiting[0].notice, /No executive\/team is assigned to Pending Palms/);
+    assert.match(waiting[0].notice, /No executive is assigned to Pending Palms/);
 
     const r = await t.call(`/admin/properties/${p.id}/executives`, 'PUT', { executiveIds: [a.id, b.id] });
     assert.equal(r.body.assignedPendingLeads, 3);

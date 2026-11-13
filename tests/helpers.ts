@@ -10,7 +10,7 @@ import { upsertByEmail } from '../src/modules/users/user.repository';
 export const ZERO = '00000000-0000-0000-0000-000000000000';
 
 export async function startTestApp() {
-  await pool.query('TRUNCATE users, teams, customers, properties CASCADE');
+  await pool.query('TRUNCATE users, customers, properties CASCADE');
   await upsertByEmail({ name: 'Admin', email: 'admin@test.com', username: 'admin', passwordHash: await hashPassword('Admin-pass-123'), role: 'ADMIN' });
   const server: Server = createApp().listen(0);
   initSocketServer(server);
@@ -27,9 +27,8 @@ export async function startTestApp() {
   const token = (await raw('/auth/admin/login', 'POST', { email: 'admin@test.com', password: 'Admin-pass-123' }, '')).body.accessToken as string;
   const call = (path: string, method = 'GET', body?: unknown) => raw(path, method, body, token);
 
-  const team = async (name: string) => (await call('/admin/teams', 'POST', { name })).body;
-  const exec = async (username: string, teamId?: string, designation?: string) =>
-    (await call('/admin/executives', 'POST', { name: username[0].toUpperCase() + username.slice(1), email: `${username}@test.com`, username, password: 'TempPass123', teamId, designation })).body;
+  const exec = async (username: string, managerId?: string, designation?: string) =>
+    (await call('/admin/executives', 'POST', { name: username[0].toUpperCase() + username.slice(1), email: `${username}@test.com`, username, password: 'TempPass123', managerId, designation })).body;
   const manager = async (username: string) =>
     (await call('/admin/managers', 'POST', { name: username[0].toUpperCase() + username.slice(1), email: `${username}@test.com`, username, password: 'TempPass123' })).body;
   const setActive = (id: string, isActive: boolean) => call(`/admin/executives/${id}/status`, 'PATCH', { isActive });
@@ -57,5 +56,5 @@ export async function startTestApp() {
     (await raw(`/auth/${portal}/login`, 'POST', { email, password }, '')).body.accessToken as string;
   const asToken = (tok: string) => (path: string, method = 'GET', body?: unknown) => raw(path, method, body, tok);
 
-  return { makeLead, manager, login, asToken, call, team, exec, setActive, property, base, close: async () => { await closeSocketServer(); server.close(); await pool.end(); } };
+  return { makeLead, manager, login, asToken, call, exec, setActive, property, base, close: async () => { await closeSocketServer(); server.close(); await pool.end(); } };
 }

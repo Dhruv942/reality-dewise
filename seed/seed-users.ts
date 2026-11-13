@@ -34,9 +34,6 @@ const seedEnv = z.object({
   SEED_EXECUTIVE_3_USERNAME: z.string().min(3).default('priya'),
   SEED_EXECUTIVE_3_NAME: z.string().min(1).default('Priya'),
   SEED_EXECUTIVE_3_PASSWORD: optionalPassword('SEED_EXECUTIVE_3_PASSWORD'),
-
-  // The team the seeded manager leads and the seeded executives belong to.
-  SEED_TEAM_NAME: z.string().min(1).default('Sales Team'),
 });
 
 interface SeedUser {
@@ -80,18 +77,12 @@ async function main(): Promise<void> {
     console.log(`Seeded ${user.role}${user.designation ? ` (${user.designation})` : ''}: ${user.email} / username "${user.username}"`);
   }
 
-  // Put the manager and the executives together so the manager sees their leads and can assign to them.
+  // The seeded executives report to the seeded manager, so the manager sees their leads and can assign to them.
   const manager = seeded.find((u) => u.role === 'MANAGER');
   const executiveIds = seeded.filter((u) => u.role === 'SALES').map((u) => u.id);
   if (manager && executiveIds.length > 0) {
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO teams (name, description, manager_id) VALUES ($1, 'Seeded team', $2)
-       ON CONFLICT (lower(name)) DO UPDATE SET manager_id = EXCLUDED.manager_id
-       RETURNING id`,
-      [s.SEED_TEAM_NAME, manager.id],
-    );
-    await pool.query('UPDATE users SET team_id = $1 WHERE id = ANY($2::uuid[])', [rows[0].id, executiveIds]);
-    console.log(`Team "${s.SEED_TEAM_NAME}": led by the manager, with ${executiveIds.length} executive(s) as members`);
+    await pool.query('UPDATE users SET manager_id = $1 WHERE id = ANY($2::uuid[])', [manager.id, executiveIds]);
+    console.log(`Manager: ${executiveIds.length} executive(s) now report to them`);
   }
 }
 

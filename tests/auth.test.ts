@@ -35,7 +35,7 @@ const login = async (portal: 'admin' | 'executive', creds: object) =>
   call(`/api/v1/auth/${portal}/login`, { body: creds });
 
 before(async () => {
-  await pool.query('TRUNCATE users, teams CASCADE');
+  await pool.query('TRUNCATE users CASCADE');
   const mk = async (u: typeof ADMIN, name: string, role: 'ADMIN' | 'SALES') =>
     upsertByEmail({ name, email: u.email, username: u.email.split('@')[0], passwordHash: await hashPassword(u.password), role });
   adminId = (await mk(ADMIN, 'Admin', 'ADMIN')).id;

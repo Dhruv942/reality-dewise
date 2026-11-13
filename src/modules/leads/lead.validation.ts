@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { customerEmail, customerMobile, customerName } from '../customers/customer.validation';
 import { PROPERTY_SOURCES } from '../properties/property.model';
-import { ENQUIRY_TYPES, LEAD_STATUSES, PIPELINE_STATUSES, isValidTimeZone } from './lead.model';
+import { ENQUIRY_TYPES, INVALID_REASONS, LEAD_STATUSES, LOST_REASONS, PIPELINE_STATUSES, STATUS_REASONS, isValidTimeZone } from './lead.model';
 
 export const idParam = z.object({ id: z.uuid('Invalid id') });
 
@@ -30,17 +30,36 @@ export const createLeadSchema = z.strictObject({
   externalLeadId: z.string().trim().min(1).max(100).nullish(),
 });
 
-/** A manager adds a lead and must give it to one of the sales users of the teams they lead. */
+/** A manager adds a lead and must give it to one of their own sales users. */
 export const managerCreateLeadSchema = createLeadSchema.extend({ executiveId: z.uuid('Invalid executive id') });
 
 const filterStatus = z.enum(LEAD_STATUSES, { error: `Status must be one of: ${LEAD_STATUSES.join(', ')}` });
 const setStatus = z.enum(PIPELINE_STATUSES, { error: `Status must be one of: ${PIPELINE_STATUSES.join(', ')}` });
-export const statusSchema = z.strictObject({ status: setStatus });
+const statusReason = z.enum(STATUS_REASONS);
+const otherReason = z.string().trim().min(1, 'Other reason is required').max(20, 'Other reason must be at most 20 characters');
+export const statusSchema = z.strictObject({ status: setStatus, reason: statusReason.optional(), otherReason: otherReason.optional() }).superRefine((value, ctx) => {
+  const requiresReason = value.status === 'INVALID' || value.status === 'LOST';
+  if (requiresReason && !value.reason) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'A reason is required for Invalid or Lost leads' });
+  if (!requiresReason && (value.reason !== undefined || value.otherReason !== undefined)) {
+    ctx.addIssue({ code: 'custom', path: ['reason'], message: 'A reason is only allowed for Invalid or Lost leads' });
+  }
+  if (value.status === 'INVALID' && value.reason && !INVALID_REASONS.includes(value.reason as (typeof INVALID_REASONS)[number])) {
+    ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Invalid reason is not valid for Invalid leads' });
+  }
+  if (value.status === 'LOST' && value.reason && !LOST_REASONS.includes(value.reason as (typeof LOST_REASONS)[number])) {
+    ctx.addIssue({ code: 'custom', path: ['reason'], message: 'Lost reason is not valid for Lost leads' });
+  }
+  if (value.reason === 'OTHER' && !value.otherReason) ctx.addIssue({ code: 'custom', path: ['otherReason'], message: 'Other reason is required' });
+  if (value.reason !== undefined && value.reason !== 'OTHER' && value.otherReason !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['otherReason'], message: 'Other reason is only valid with reason OTHER' });
+  }
+});
 
 export const tzQuery = z.object({ tz: z.string().refine(isValidTimeZone, 'tz must be an IANA timezone, e.g. Asia/Kolkata').optional() });
 
 export const listLeadsQuery = z.object({
   status: filterStatus.optional(),
+  statusReason: z.enum(STATUS_REASONS).optional(),
   propertyId: z.uuid('Invalid property id').optional(),
   executiveId: z.uuid('Invalid executive id').optional(),
   customerId: z.uuid('Invalid customer id').optional(),
@@ -58,6 +77,10 @@ export const listLeadsQuery = z.object({
 });
 
 export const assignLeadSchema = z.strictObject({ executiveId: z.uuid('Invalid executive id') });
+export const transferLeadSchema = z.strictObject({
+  targetExecutiveId: z.uuid('Invalid target executive id'),
+  reason: z.string().trim().max(500, 'Reason must be at most 500 characters').optional(),
+});
 
 /** `followUpAt: null` clears the follow-up (and its note). The date must carry an offset, e.g. 2026-10-12T10:30:00+05:30. */
 export const followUpSchema = z.strictObject({

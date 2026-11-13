@@ -35,11 +35,11 @@ function createController(service: UserService, label: 'Executive' | 'Manager', 
         [key]: user,
       });
     },
-    assignTeam: async (req: Request, res: Response) => {
-      res.json(await service.assignTeam(parse(executiveIdParam, req.params).executiveId, req.body.teamId));
+    assignManager: async (req: Request, res: Response) => {
+      res.json(await service.assignManager(parse(executiveIdParam, req.params).executiveId, req.body.managerId));
     },
-    removeFromTeam: async (req: Request, res: Response) => {
-      res.json(await service.removeFromTeam(parse(executiveIdParam, req.params).executiveId));
+    removeManager: async (req: Request, res: Response) => {
+      res.json(await service.removeManager(parse(executiveIdParam, req.params).executiveId));
     },
   };
 }

@@ -40,12 +40,8 @@ before(async () => {
   t = await startTestApp();
   mgr1 = await t.manager('rt.mgr1');
   mgr2 = await t.manager('rt.mgr2');
-  const team1 = await t.team('RT Team 1');
-  const team2 = await t.team('RT Team 2');
-  await t.call(`/admin/teams/${team1.id}`, 'PATCH', { managerId: mgr1.id });
-  await t.call(`/admin/teams/${team2.id}`, 'PATCH', { managerId: mgr2.id });
-  a = await t.exec('rt.a', team1.id);
-  b = await t.exec('rt.b', team2.id);
+  a = await t.exec('rt.a', mgr1.id);
+  b = await t.exec('rt.b', mgr2.id);
   c = await t.exec('rt.c');
   adminToken = await t.login('admin', 'admin@test.com', 'Admin-pass-123');
   [tokA, tokB, tokC] = await Promise.all(['rt.a', 'rt.b', 'rt.c'].map((u) => t.login('executive', `${u}@test.com`, 'TempPass123')));
@@ -143,7 +139,8 @@ describe('lead created / assigned (round-robin result)', () => {
     assert.deepEqual([note[0].type, note[0].entityType, note[0].entityId, note[0].isRead], ['LEAD_ASSIGNED', 'LEAD', l.id, false]);
     const rest = (await callA('/notifications')).body;
     assert.deepEqual(rest.notifications.map((m: any) => m.id), [note[0].id]);
-    assert.equal(x.admin.of('notification:new').length, 0, 'admin is not notified of every routine assignment');
+    assert.deepEqual(x.admin.of('notification:new').map((m) => m.type), ['LEAD_CREATED']);
+    assert.deepEqual(x.M1.of('notification:new').map((m) => m.type), ['LEAD_CREATED']);
     assert.ok(!(await callB('/notifications')).body.notifications.some((m: any) => m.entityId === l.id));
   });
 
@@ -184,7 +181,7 @@ describe('pending assignment', () => {
     assert.deepEqual(x.B.of('notification:new').map((m) => m.type), ['LEAD_ASSIGNED']);
     for (const who of [x.admin, x.M2]) assert.equal(who.of('lead:assigned').length, 1, 'admin and the executive\'s manager');
     assert.equal(mentions(x.A, l.id).length, 0);
-    // The other team's manager saw it as pending: they are told it is gone, without customer data.
+    // The other executive's manager saw it as pending: they are told it is gone, without customer data.
     const slim = x.M1.of('lead:assigned');
     assert.equal(slim.length, 1);
     assert.equal(slim[0].lead, undefined);

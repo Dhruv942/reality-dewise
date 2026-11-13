@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { UnauthorizedError } from '../../utils/errors';
 import { parse } from '../../utils/validate';
 import * as service from './property.service';
 import { historyQuery, idParam, listPropertiesQuery } from './property.validation';
@@ -19,6 +20,11 @@ export const setStatus = async (req: Request, res: Response) => {
 };
 export const setExecutives = async (req: Request, res: Response) => {
   res.json(await service.setExecutives(id(req), req.body.executiveIds));
+};
+// ---- manager: same properties, but they only edit their own executives' part of the list ----
+export const managerSetExecutives = async (req: Request, res: Response) => {
+  if (!req.user) throw new UnauthorizedError();
+  res.json(await service.setExecutives(id(req), req.body.executiveIds, req.user.id));
 };
 export const history = async (req: Request, res: Response) => {
   const q = parse(historyQuery, req.query);

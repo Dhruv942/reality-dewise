@@ -9,4 +9,6 @@ export const loginSchema = z
   })
   .refine((v) => v.email || v.username, { message: 'Email or username is required', path: ['email'] });
 
+export const refreshSchema = z.strictObject({ refreshToken: z.string({ error: 'Refresh token is required' }).min(1).max(2000) });
+
 export type LoginInput = z.infer<typeof loginSchema>;
