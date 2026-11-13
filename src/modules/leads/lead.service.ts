@@ -31,6 +31,8 @@ export interface NewLeadInput {
   message?: string | null;
   /** Portal's own enquiry id. When given, submitting the same one again returns the existing lead. */
   externalLeadId?: string | null;
+  /** Timestamp supplied by the portal, retained separately from CRM acceptance time when available. */
+  externalCreatedAt?: Date | null;
   rawPayload?: unknown;
   /** Give the lead straight to this executive (already checked with `assertAssignable`) instead of the round-robin. */
   assignTo?: { executiveId: string; byId: string };
@@ -76,6 +78,7 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         budget: input.budget ?? null,
         propertyName: input.propertyName,
         externalLeadId,
+        externalCreatedAt: input.externalCreatedAt ?? null,
         rawPayload: input.rawPayload,
       });
       activities.push(await recordReceived(tx, id, source, viewerId));

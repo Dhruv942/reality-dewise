@@ -16,3 +16,15 @@ export const createLoginLimiter = (max: number = env.LOGIN_RATE_LIMIT_MAX) =>
       res.status(429).json({ success: false, message: 'Too many failed login attempts, please try again later' });
     },
   });
+
+/** Public webhook protection. This is abuse control, not sender authentication. */
+export const createMagicbricksLimiter = (max = 60) =>
+  rateLimit({
+    windowMs: 60_000,
+    limit: max,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ success: false, message: 'Too many webhook requests, please try again later' });
+    },
+  });

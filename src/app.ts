@@ -14,10 +14,13 @@ import { noteRouter } from './modules/notes/note.routes';
 import { notificationRouter } from './modules/notifications/notification.routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { createLoginLimiter } from './middleware/rateLimit';
+import { createMagicbricksRouter } from './modules/webhooks/magicbricks.routes';
 
 export interface AppOptions {
   /** Override the failed-login limit (tests). Defaults to LOGIN_RATE_LIMIT_MAX. */
   loginRateLimitMax?: number;
+  /** Override the public Magicbricks webhook limit (tests). Defaults to 60 requests/minute/IP. */
+  magicbricksRateLimitMax?: number;
 }
 
 /** `mount` lets future modules (and tests) add routes under /api/v1 before the 404/error handlers. */
@@ -38,7 +41,9 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
   if (env.corsOrigins.length > 0) {
     app.use(cors({ origin: env.corsOrigins, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Authorization', 'Content-Type'], maxAge: 600 }));
   }
-  app.use(express.json({ limit: '100kb' }));
+  // This public integration gets a stricter parser limit and has no authentication middleware by design.
+  app.use('/api/v1/webhooks/magicbricks', express.json({ limit: '32kb', strict: true }), createMagicbricksRouter(options.magicbricksRateLimitMax));
+  app.use(express.json({ limit: '100kb', strict: true }));
 
   app.get('/health', async (_req, res) => {
     try {

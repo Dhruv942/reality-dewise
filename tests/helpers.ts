@@ -9,10 +9,10 @@ import { upsertByEmail } from '../src/modules/users/user.repository';
 
 export const ZERO = '00000000-0000-0000-0000-000000000000';
 
-export async function startTestApp() {
+export async function startTestApp(options: Parameters<typeof createApp>[1] = {}) {
   await pool.query('TRUNCATE users, customers, properties CASCADE');
   await upsertByEmail({ name: 'Admin', email: 'admin@test.com', username: 'admin', passwordHash: await hashPassword('Admin-pass-123'), role: 'ADMIN' });
-  const server: Server = createApp().listen(0);
+  const server: Server = createApp(undefined, options).listen(0);
   initSocketServer(server);
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 

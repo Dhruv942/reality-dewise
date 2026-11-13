@@ -123,7 +123,7 @@ One database **transaction** covers everything, so a lead is never stored half-p
 ## 5. Known limitations and ideas
 
 - **No push notifications:** the dashboard polls. Server-sent events (single instance) or Postgres `LISTEN/NOTIFY` (multiple instances) would add real-time delivery.
-- **No portal webhook yet:** leads are created through `POST /admin/leads`. `createLead()` is already the single entry point and is idempotent through `externalLeadId`, so a webhook only needs authentication (API key) and field mapping.
+- **Magicbricks webhook:** `POST /api/v1/webhooks/magicbricks/leads` is intentionally unauthenticated because Magicbricks supplies only a URL. It uses a strict route-local parser, rate limiting, provisional field mapping, and the same `createLead()` transaction and `(source, externalLeadId)` idempotency constraint as the admin API. The URL alone does not authenticate the sender; see `docs/MAGICBRICKS_WEBHOOK.md` for residual risk and vendor confirmation requirements.
 - **Lead statuses have no enforced order**, and there is no activity or notes timeline (only the lead's `message`).
 - **Auth:** no refresh tokens, no password-reset flow.
 - **Pagination** returns plain arrays without a total count.

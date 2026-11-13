@@ -131,13 +131,14 @@ export async function insert(
     budget: number | null;
     propertyName: string;
     externalLeadId: string | null;
+    externalCreatedAt: Date | null;
     rawPayload: unknown;
   },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO leads (customer_id, property_id, source, status, message, requirement, enquiry_type, budget, property_name, external_lead_id, raw_payload)
-     VALUES ($1, $2, $3, 'PENDING_ASSIGNMENT', $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-    [l.customerId, l.propertyId, l.source, l.message, l.requirement, l.enquiryType, l.budget, l.propertyName, l.externalLeadId, l.rawPayload ?? null],
+    `INSERT INTO leads (customer_id, property_id, source, status, message, requirement, enquiry_type, budget, property_name, external_lead_id, external_created_at, raw_payload)
+     VALUES ($1, $2, $3, 'PENDING_ASSIGNMENT', $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+    [l.customerId, l.propertyId, l.source, l.message, l.requirement, l.enquiryType, l.budget, l.propertyName, l.externalLeadId, l.externalCreatedAt, l.rawPayload ?? null],
   );
   return rows[0].id;
 }
