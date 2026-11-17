@@ -124,7 +124,7 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 │       ├── admin/admin.routes.ts # mounts every admin module under /api/v1/admin (ADMIN only)
 │       ├── manager-portal/       # /api/v1/manager: a manager's executives, leads, lead assignment and property executive lists (MANAGER only)
 │       └── executive-portal/     # /api/v1/executive: a sales user's own leads (SALES only)
-   ├── migrations/                   # numbered SQL migrations (001 … 030)
+   ├── migrations/                   # numbered SQL migrations (001 … 031)
 ├── seed/seed-users.ts            # creates the first admin, an optional manager and up to 3 executives (the executives report to the manager)
 ├── tests/                        # integration tests (real HTTP + real Postgres)
 ├── public/test-console.html      # dev-only manual API tester

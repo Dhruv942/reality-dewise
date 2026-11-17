@@ -59,6 +59,7 @@ PostgreSQL, SQL migrations in `migrations/` (applied in numeric order, tracked i
 | 028 | portal property mappings, lead property-match metadata, unresolved-property routing setting and resolution activity |
 | 029 | future portal-source enum compatibility for property mappings |
 | 030 | reporting indexes for lead filters, follow-ups and assignment-history queries |
+| 031 | restores `leads.external_created_at`, required by portal webhook persistence |
 
 ```mermaid
 erDiagram
