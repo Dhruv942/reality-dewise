@@ -31,7 +31,11 @@ export interface AppOptions {
 export function createApp(mount?: (api: Router) => void, options: AppOptions = {}): Express {
   const app = express();
   app.disable('x-powered-by');
+  // Render and similar platforms terminate TLS at a reverse proxy. Keep the explicit
+  // setting available, but use one trusted proxy in production when it is omitted so
+  // express-rate-limit can safely process X-Forwarded-For.
   if (env.TRUST_PROXY !== undefined) app.set('trust proxy', env.TRUST_PROXY);
+  else if (env.NODE_ENV === 'production') app.set('trust proxy', 1);
 
   // Dev-only manual test page. Registered before helmet: its CSP would block the page's inline script.
   if (env.NODE_ENV !== 'production') {

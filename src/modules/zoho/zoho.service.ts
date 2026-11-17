@@ -19,8 +19,15 @@ function config() {
   return { clientId: env.ZOHO_CLIENT_ID!, clientSecret: env.ZOHO_CLIENT_SECRET!, redirectUri: env.ZOHO_REDIRECT_URI!, accountsBaseUrl: env.ZOHO_ACCOUNTS_BASE_URL!.replace(/\/$/, ''), mailBaseUrl: env.ZOHO_MAIL_BASE_URL!.replace(/\/$/, ''), encryptionKey: env.ZOHO_TOKEN_ENCRYPTION_KEY! };
 }
 
+const providerErrorCode = (body: unknown): string | null => {
+  if (!body || typeof body !== 'object') return null;
+  const value = (body as { error?: unknown }).error;
+  return typeof value === 'string' && /^[a-z0-9_-]{1,80}$/i.test(value) ? value : null;
+};
+
 const safeProviderError = (status: number, body: unknown): Error & { status?: number; permanent?: boolean } => {
-  const err = new Error(`Zoho Mail request failed (${status})`) as Error & { status?: number; permanent?: boolean };
+  const code = providerErrorCode(body);
+  const err = new Error(`Zoho Mail request failed (${status}${code ? `: ${code}` : ''})`) as Error & { status?: number; permanent?: boolean };
   err.status = status;
   err.permanent = status === 400 || status === 401 || status === 403;
   return err;
@@ -39,7 +46,10 @@ async function jsonFetch(url: string, init: RequestInit): Promise<any> {
 }
 
 const parseToken = (body: any) => {
-  if (!body?.access_token || typeof body.access_token !== 'string') throw new AppError(502, 'Zoho token exchange failed');
+  if (!body?.access_token || typeof body.access_token !== 'string') {
+    const code = providerErrorCode(body);
+    throw new AppError(502, `Zoho token exchange failed${code ? `: ${code}` : ''}`);
+  }
   return { accessToken: body.access_token as string, refreshToken: typeof body.refresh_token === 'string' ? body.refresh_token : null, expiresIn: Number(body.expires_in) > 0 ? Number(body.expires_in) : 3600 };
 };
 
