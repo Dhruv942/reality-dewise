@@ -25,15 +25,15 @@ const providerErrorCode = (body: unknown): string | null => {
   return typeof value === 'string' && /^[a-z0-9_-]{1,80}$/i.test(value) ? value : null;
 };
 
-const safeProviderError = (status: number, body: unknown): Error & { status?: number; permanent?: boolean } => {
+const safeProviderError = (operation: string, status: number, body: unknown): Error & { status?: number; permanent?: boolean } => {
   const code = providerErrorCode(body);
-  const err = new Error(`Zoho Mail request failed (${status}${code ? `: ${code}` : ''})`) as Error & { status?: number; permanent?: boolean };
+  const err = new Error(`Zoho Mail ${operation} failed (${status}${code ? `: ${code}` : ''})`) as Error & { status?: number; permanent?: boolean };
   err.status = status;
   err.permanent = status === 400 || status === 401 || status === 403;
   return err;
 };
 
-async function jsonFetch(url: string, init: RequestInit): Promise<any> {
+async function jsonFetch(url: string, init: RequestInit, operation = 'request'): Promise<any> {
   let response: Response;
   try {
     response = await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(15_000) });
@@ -41,7 +41,7 @@ async function jsonFetch(url: string, init: RequestInit): Promise<any> {
     throw new Error('Zoho Mail network request failed');
   }
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw safeProviderError(response.status, body);
+  if (!response.ok) throw safeProviderError(operation, response.status, body);
   return body;
 }
 
@@ -63,7 +63,7 @@ function parseAccounts(body: any): ZohoAccount[] {
 
 async function exchangeCode(code: string, c = config()) {
   const form = new URLSearchParams({ code, client_id: c.clientId, client_secret: c.clientSecret, redirect_uri: c.redirectUri, grant_type: 'authorization_code' });
-  return parseToken(await jsonFetch(`${c.accountsBaseUrl}/oauth/v2/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form }));
+  return parseToken(await jsonFetch(`${c.accountsBaseUrl}/oauth/v2/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form }, 'token exchange'));
 }
 
 export async function beginConnect(adminId: string): Promise<string> {
@@ -83,7 +83,7 @@ export async function completeCallback(input: { code?: string; state?: string; e
   if (!adminId) throw new AppError(400, 'Zoho OAuth state is invalid or expired');
   const token = await exchangeCode(input.code, c);
   if (!token.refreshToken) throw new AppError(502, 'Zoho did not return a refresh token; reconnect with offline access');
-  const accounts = parseAccounts(await jsonFetch(`${c.mailBaseUrl}/api/accounts`, { headers: { Authorization: `Zoho-oauthtoken ${token.accessToken}`, Accept: 'application/json' } }));
+  const accounts = parseAccounts(await jsonFetch(`${c.mailBaseUrl}/api/accounts`, { headers: { Authorization: `Zoho-oauthtoken ${token.accessToken}`, Accept: 'application/json' } }, 'account lookup'));
   const account = accounts[0];
   if (!account) throw new AppError(502, 'No usable Zoho Mail account was returned');
   await repo.saveIntegration({ adminId, accountId: account.accountId, senderEmail: account.email, encryptedRefreshToken: encryptSecret(token.refreshToken, c.encryptionKey), encryptedAccessToken: encryptSecret(token.accessToken, c.encryptionKey), accessTokenExpiresAt: new Date(Date.now() + token.expiresIn * 1000), accountsBaseUrl: c.accountsBaseUrl, mailBaseUrl: c.mailBaseUrl });
@@ -106,7 +106,7 @@ async function refreshAccessToken(row: ZohoIntegrationRow, c: ReturnType<typeof 
     try { refreshToken = decryptSecret(current.encrypted_refresh_token, c.encryptionKey); } catch { throw new AppError(503, 'Zoho Mail credentials are unavailable; reconnect is required'); }
     const form = new URLSearchParams({ refresh_token: refreshToken, client_id: c.clientId, client_secret: c.clientSecret, grant_type: 'refresh_token' });
     try {
-      const token = parseToken(await jsonFetch(`${current.accounts_base_url}/oauth/v2/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form }));
+      const token = parseToken(await jsonFetch(`${current.accounts_base_url}/oauth/v2/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form }, 'token refresh'));
       await repo.updateAccessToken(current.id, encryptSecret(token.accessToken, c.encryptionKey), new Date(Date.now() + token.expiresIn * 1000));
       return token.accessToken;
     } catch (err) {
@@ -123,7 +123,7 @@ export async function sendEmail(input: ZohoEmailInput): Promise<ZohoSendResult> 
   const row = await repo.getIntegration();
   if (!row || row.status !== 'CONNECTED') throw new AppError(409, 'Zoho Mail is not connected');
   const accessToken = await refreshAccessToken(row, c);
-  const body = await jsonFetch(`${row.mail_base_url}/api/accounts/${encodeURIComponent(row.account_id)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, 'content-type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ fromAddress: row.sender_email, toAddress: input.toAddress, subject: input.subject, content: input.htmlContent, htmlContent: input.htmlContent, mailFormat: 'html' }) });
+  const body = await jsonFetch(`${row.mail_base_url}/api/accounts/${encodeURIComponent(row.account_id)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, 'content-type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ fromAddress: row.sender_email, toAddress: input.toAddress, subject: input.subject, content: input.htmlContent, htmlContent: input.htmlContent, mailFormat: 'html' }) }, 'send email');
   return { providerMessageId: typeof body?.data?.messageId === 'string' ? body.data.messageId : typeof body?.data?.mailId === 'string' ? body.data.mailId : null };
 }
 
