@@ -28,3 +28,14 @@ export const createMagicbricksLimiter = (max = 60) =>
       res.status(429).json({ success: false, message: 'Too many webhook requests, please try again later' });
     },
   });
+
+export const create99acresLimiter = (max = 60) =>
+  rateLimit({
+    windowMs: 60_000,
+    limit: max,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ success: false, message: 'Too many webhook requests, please try again later' });
+    },
+  });
