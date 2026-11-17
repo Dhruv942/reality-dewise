@@ -47,6 +47,12 @@ describe('property CRUD', () => {
     const r = await t.call(`/admin/properties/${p.id}`);
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.executives, []);
+    assert.equal(r.body.inquiryCount, 10);
+    assert.equal(r.body.assignedInquiryCount, 0);
+    assert.equal(r.body.pendingInquiryCount, 10);
+    assert.equal(r.body.inquiries.length, 10);
+    assert.equal(r.body.inquiries[0].source, '99ACRES');
+    assert.equal(r.body.inquiries[0].customer.name, 'Ravi');
     assert.equal((await t.call(`/admin/properties/${ZERO}`)).status, 404);
     assert.equal((await t.call('/admin/properties/zzz')).status, 400);
   });

@@ -19,12 +19,33 @@ async function getProperty(id: string): Promise<PropertyRow> {
 
 export const listProperties = async (f: Parameters<typeof repo.list>[0]) => (await repo.list(f)).map(toPropertyDto);
 
-export async function getPropertyDetails(id: string) {
+export async function getPropertyDetails(id: string, inquiryLimit = 50, inquiryOffset = 0, managerId?: string) {
   const p = await getProperty(id);
   const executives = await repo.listExecutives(id);
+  const [inquirySummary, inquiries] = await Promise.all([
+    repo.inquirySummary(id, managerId),
+    repo.listInquiries(id, inquiryLimit, inquiryOffset, managerId),
+  ]);
   return {
     ...toPropertyDto(p),
     executives: executives.map((e) => ({ id: e.id, name: e.name, username: e.username, isActive: e.is_active })),
+    inquiryCount: inquirySummary.total,
+    assignedInquiryCount: inquirySummary.assigned,
+    pendingInquiryCount: inquirySummary.pending,
+    inquiries: inquiries.map((lead) => ({
+      id: lead.id,
+      leadNo: lead.lead_no,
+      customer: { id: lead.customer_id, name: lead.customer_name },
+      source: lead.source,
+      status: lead.status,
+      enquiryType: lead.enquiry_type,
+      message: lead.message,
+      assignedExecutive: lead.assigned_executive_id ? { id: lead.assigned_executive_id, name: lead.assigned_executive_name } : null,
+      manager: lead.manager_id ? { id: lead.manager_id, name: lead.manager_name } : null,
+      createdAt: lead.created_at,
+      followUpAt: lead.follow_up_at,
+    })),
+    inquiryPagination: { limit: inquiryLimit, offset: inquiryOffset, returned: inquiries.length, total: inquirySummary.total },
   };
 }
 

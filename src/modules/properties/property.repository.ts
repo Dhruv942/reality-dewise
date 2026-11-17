@@ -4,6 +4,29 @@ import type { Db } from '../../database/transaction';
 import { escapeLike } from '../../utils/like';
 import type { PropertyExecutiveRow, PropertyRow } from './property.model';
 
+export interface PropertyInquiryRow {
+  id: string;
+  lead_no: number;
+  customer_id: string;
+  customer_name: string;
+  source: string;
+  status: string;
+  enquiry_type: string | null;
+  message: string | null;
+  assigned_executive_id: string | null;
+  assigned_executive_name: string | null;
+  manager_id: string | null;
+  manager_name: string | null;
+  created_at: Date;
+  follow_up_at: Date | null;
+}
+
+export interface PropertyInquirySummary {
+  total: number;
+  assigned: number;
+  pending: number;
+}
+
 /** Must stay identical to the generated column `properties.name_key` (see migration 007). */
 const NAME_KEY = (param: string) => `lower(regexp_replace(btrim(${param}), '\\s+', ' ', 'g'))`;
 
@@ -81,6 +104,48 @@ export async function listExecutives(propertyId: string, db: Db = pool): Promise
     [propertyId],
   );
   return rows;
+}
+
+function inquiryScope(managerId: string | undefined, params: unknown[]): string {
+  if (!managerId) return '';
+  params.push(managerId);
+  const placeholder = `$${params.length}`;
+  return ` AND (e.manager_id = ${placeholder} OR (l.assigned_executive_id IS NULL AND (l.property_review_manager_id IS NULL OR l.property_review_manager_id = ${placeholder})))`;
+}
+
+export async function inquirySummary(propertyId: string, managerId?: string): Promise<PropertyInquirySummary> {
+  const params: unknown[] = [propertyId];
+  const result = await pool.query<{ total: string; assigned: string; pending: string }>(
+    `SELECT count(*)::text AS total,
+       count(*) FILTER (WHERE l.assigned_executive_id IS NOT NULL)::text AS assigned,
+       count(*) FILTER (WHERE l.status = 'PENDING_ASSIGNMENT')::text AS pending
+     FROM leads l
+     LEFT JOIN users e ON e.id = l.assigned_executive_id
+     WHERE l.property_id = $1${inquiryScope(managerId, params)}`,
+    params,
+  );
+  const row = result.rows[0];
+  return { total: Number(row.total), assigned: Number(row.assigned), pending: Number(row.pending) };
+}
+
+export async function listInquiries(propertyId: string, limit: number, offset: number, managerId?: string): Promise<PropertyInquiryRow[]> {
+  const params: unknown[] = [propertyId];
+  const scope = inquiryScope(managerId, params);
+  params.push(limit, offset);
+  const result = await pool.query<PropertyInquiryRow>(
+    `SELECT l.id, l.lead_no, c.id AS customer_id, c.name AS customer_name, l.source, l.status, l.enquiry_type,
+       l.message, l.assigned_executive_id, e.name AS assigned_executive_name,
+       e.manager_id, m.name AS manager_name, l.created_at, l.follow_up_at
+     FROM leads l
+     JOIN customers c ON c.id = l.customer_id
+     LEFT JOIN users e ON e.id = l.assigned_executive_id
+     LEFT JOIN users m ON m.id = e.manager_id
+     WHERE l.property_id = $1${scope}
+     ORDER BY l.created_at DESC, l.id DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  return result.rows;
 }
 
 /** Serialises concurrent edits of one property's executive list. */
