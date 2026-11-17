@@ -5,6 +5,7 @@ import type { NotificationType } from '../notifications/notification.model';
 import * as repo from './lead.repository';
 import { toActivityDto, type ActivityRow } from './lead-activity.repository';
 import { toLeadDto, type LeadRow, type LeadStatus } from './lead.model';
+import { enqueueAssignment } from '../email-notifications/email-notification.service';
 
 /**
  * Real-time + in-app notifications for lead events. Every function here is called AFTER the business change
@@ -192,6 +193,7 @@ export const publishAssignment = (
 
     // The same assignment (same lead, executive and assigned_at) can only notify once, whatever retries.
     const key = `${row.id}:${executiveId}:${row.assigned_at.getTime()}`;
+    await enqueueAssignment({ leadId: row.id, executiveId, assignedAt: row.assigned_at });
     await notify({
       userId: executiveId,
       type: previous ? 'LEAD_REASSIGNED' : 'LEAD_ASSIGNED',

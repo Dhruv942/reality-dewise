@@ -29,6 +29,13 @@ const schema = z.object({
   VAPID_SUBJECT: z.string().min(1).optional(),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   LOGIN_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
+  ZOHO_CLIENT_ID: z.string().min(1).optional(),
+  ZOHO_CLIENT_SECRET: z.string().min(1).optional(),
+  ZOHO_REDIRECT_URI: z.string().url().optional(),
+  ZOHO_ACCOUNTS_BASE_URL: z.string().url().optional(),
+  ZOHO_MAIL_BASE_URL: z.string().url().optional(),
+  ZOHO_TOKEN_ENCRYPTION_KEY: z.string().min(32).optional(),
+  FRONTEND_URL: z.string().url().default('http://localhost:3000'),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -10,12 +10,8 @@ after(() => t.close());
 describe('Zoho OAuth callback', () => {
   it('accepts a callback code and state without returning either secret', async () => {
     const response = await t.call('/auth/zoho/callback?code=authorization-code-123&state=state-123');
-    assert.equal(response.status, 200);
-    assert.deepEqual(response.body, {
-      success: true,
-      message: 'Zoho OAuth callback received',
-      nextStep: 'authorization_code_exchange_pending',
-    });
+    assert.equal(response.status, 503);
+    assert.deepEqual(response.body, { success: false, message: 'Zoho Mail integration is not configured' });
     assert.equal(JSON.stringify(response.body).includes('authorization-code-123'), false);
     assert.equal(JSON.stringify(response.body).includes('state-123'), false);
   });

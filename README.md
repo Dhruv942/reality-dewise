@@ -17,7 +17,7 @@ REST API for a real-estate lead desk. Enquiries from portals (99acres, Magicbric
 
 More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (design, database, rules) and [`docs/FRONTEND_ROUND_ROBIN_GUIDE.md`](docs/FRONTEND_ROUND_ROBIN_GUIDE.md) (frontend guide: round robin lead assignment, the admin-only rule and 90-minute SLA settings, manual assignment, and every API involved, per role).
 
-The initial Zoho Mail OAuth callback setup is documented in [`docs/ZOHO_OAUTH_CALLBACK.md`](docs/ZOHO_OAUTH_CALLBACK.md). It currently acknowledges the callback only; token exchange and state verification are intentionally deferred.
+Zoho Mail OAuth and assignment-email delivery are documented in [`docs/ZOHO_OAUTH_CALLBACK.md`](docs/ZOHO_OAUTH_CALLBACK.md). The backend stores OAuth state and encrypted tokens in PostgreSQL and sends assignment mail through a durable retry queue; no frontend code is included in this integration.
 
 ---
 
@@ -197,6 +197,7 @@ Base path `/api/v1`. All errors look like `{ "success": false, "message": "…",
 | Area | Endpoints | Who |
 |---|---|---|
 | Auth | `POST /auth/admin/login`, `/auth/manager/login`, `/auth/executive/login`, `GET /auth/me` | public / any token |
+| Zoho Mail | `GET /auth/zoho/connect`, `GET /auth/zoho/callback`, `GET /integrations/zoho/status`, `POST /integrations/zoho/test-email`, `POST /integrations/zoho/disconnect` | admin for management; callback public |
 | Managers | `/admin/managers` (CRUD, status, password) | admin |
 | Sales executives | `/admin/executives` (CRUD incl. `designation`, `managerId`, status, password; `PATCH/DELETE /:id/manager` sets or clears the manager) | admin |
 | Properties | `/admin/properties` (list, get, edit, status, `PUT :id/executives`, assignment history) | admin |
@@ -277,6 +278,8 @@ npm start               # node dist/src/server.js
 ```
 
 Set `NODE_ENV=production`, `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS` (your frontend URL) and `TRUST_PROXY=1` behind a proxy. Run `npm run seed:prod` once to create the first admin. `GET /health` is the health check. Free-tier hosts sleep when idle, so the first request can be slow.
+
+For Zoho Mail, also set `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REDIRECT_URI`, `ZOHO_ACCOUNTS_BASE_URL`, `ZOHO_MAIL_BASE_URL`, `ZOHO_TOKEN_ENCRYPTION_KEY` and `FRONTEND_URL`. Apply migrations before starting the service. Use the same Zoho data-center region for the Accounts and Mail URLs; for India these are `https://accounts.zoho.in` and `https://mail.zoho.in`. The registered redirect URI remains `https://reality-dewise.onrender.com/api/v1/auth/zoho/callback`. The worker runs inside the API process and uses PostgreSQL-backed jobs, so queued records survive a Render restart.
 
 ## Troubleshooting
 

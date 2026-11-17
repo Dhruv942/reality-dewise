@@ -16,6 +16,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { createLoginLimiter } from './middleware/rateLimit';
 import { createMagicbricksRouter } from './modules/webhooks/magicbricks.routes';
 import { create99acresRouter } from './modules/webhooks/99acres.routes';
+import { zohoIntegrationRouter } from './modules/zoho/zoho.routes';
 
 export interface AppOptions {
   /** Override the failed-login limit (tests). Defaults to LOGIN_RATE_LIMIT_MAX. */
@@ -60,6 +61,7 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
 
   const api = express.Router();
   api.use('/auth', createAuthRouter(createLoginLimiter(options.loginRateLimitMax)));
+  api.use('/integrations/zoho', zohoIntegrationRouter);
   api.use('/admin', adminRouter);
   api.use('/executive', portalRouter);
   api.use('/manager', managerPortalRouter);
