@@ -25,9 +25,19 @@ const providerErrorCode = (body: unknown): string | null => {
   return typeof value === 'string' && /^[a-z0-9_-]{1,80}$/i.test(value) ? value : null;
 };
 
+const providerErrorDescription = (body: unknown): string | null => {
+  if (!body || typeof body !== 'object') return null;
+  const status = (body as { status?: unknown }).status;
+  if (!status || typeof status !== 'object') return null;
+  const value = (status as { description?: unknown }).description;
+  return typeof value === 'string' && /^[a-z0-9 ._\-]{1,120}$/i.test(value) ? value : null;
+};
+
 const safeProviderError = (operation: string, status: number, body: unknown): Error & { status?: number; permanent?: boolean } => {
   const code = providerErrorCode(body);
-  const err = new Error(`Zoho Mail ${operation} failed (${status}${code ? `: ${code}` : ''})`) as Error & { status?: number; permanent?: boolean };
+  const description = providerErrorDescription(body);
+  const detail = code ?? description;
+  const err = new Error(`Zoho Mail ${operation} failed (${status}${detail ? `: ${detail}` : ''})`) as Error & { status?: number; permanent?: boolean };
   err.status = status;
   err.permanent = status === 400 || status === 401 || status === 403;
   return err;
@@ -123,7 +133,7 @@ export async function sendEmail(input: ZohoEmailInput): Promise<ZohoSendResult> 
   const row = await repo.getIntegration();
   if (!row || row.status !== 'CONNECTED') throw new AppError(409, 'Zoho Mail is not connected');
   const accessToken = await refreshAccessToken(row, c);
-  const body = await jsonFetch(`${row.mail_base_url}/api/accounts/${encodeURIComponent(row.account_id)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, 'content-type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ fromAddress: row.sender_email, toAddress: input.toAddress, subject: input.subject, content: input.htmlContent, htmlContent: input.htmlContent, mailFormat: 'html' }) }, 'send email');
+  const body = await jsonFetch(`${row.mail_base_url}/api/accounts/${encodeURIComponent(row.account_id)}/messages`, { method: 'POST', headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, 'content-type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ fromAddress: row.sender_email, toAddress: input.toAddress, subject: input.subject, content: input.htmlContent, mailFormat: 'html' }) }, 'send email');
   return { providerMessageId: typeof body?.data?.messageId === 'string' ? body.data.messageId : typeof body?.data?.mailId === 'string' ? body.data.mailId : null };
 }
 
