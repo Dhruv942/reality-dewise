@@ -8,6 +8,8 @@ import { publishAssignment } from '../leads/lead.events';
 import type { ActivityRow } from '../leads/lead-activity.repository';
 import * as repo from './property.repository';
 import { toPropertyDto, type PropertyRow } from './property.model';
+import { classifyPriceBand } from '../catalog/catalog.policy';
+import * as projectService from '../projects/project.service';
 
 async function getProperty(id: string): Promise<PropertyRow> {
   const p = await repo.findById(id);
@@ -28,14 +30,24 @@ export async function getPropertyDetails(id: string) {
 
 export async function updateProperty(
   id: string,
-  input: { name?: string; description?: string | null; location?: string | null; isActive?: boolean },
+  input: { name?: string; description?: string | null; location?: string | null; isActive?: boolean; projectId?: string | null; transactionType?: any; propertyType?: any; minPrice?: number | null; maxPrice?: number | null; currency?: string },
 ) {
-  await getProperty(id);
+  const current = await getProperty(id);
+  const nextMin = input.minPrice !== undefined ? input.minPrice : (current.min_price === null ? null : Number(current.min_price));
+  const nextMax = input.maxPrice !== undefined ? input.maxPrice : (current.max_price === null ? null : Number(current.max_price));
+  if (input.projectId) await projectService.assertActive(input.projectId);
   await repo.updateDetails(id, {
     name: input.name?.replace(/\s+/g, ' '),
     description: input.description,
     location: input.location,
     is_active: input.isActive,
+    project_id: input.projectId,
+    transaction_type: input.transactionType,
+    property_type: input.propertyType,
+    min_price: input.minPrice,
+    max_price: input.maxPrice,
+    currency: input.currency,
+    price_band: input.minPrice !== undefined || input.maxPrice !== undefined ? classifyPriceBand(nextMin, nextMax) : current.price_band,
   });
   return getPropertyDetails(id);
 }
@@ -43,7 +55,7 @@ export async function updateProperty(
 /** Inactive properties stop receiving leads; the row stays for lead history. */
 export async function setPropertyStatus(id: string, isActive: boolean) {
   await getProperty(id);
-  await repo.updateDetails(id, { is_active: isActive });
+  await repo.updateDetails(id, { is_active: isActive, archived_at: isActive ? null : new Date() });
   return getPropertyDetails(id);
 }
 

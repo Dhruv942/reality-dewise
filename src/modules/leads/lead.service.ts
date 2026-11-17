@@ -3,6 +3,7 @@ import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../
 import * as executiveRepo from '../executives/executive.repository';
 import * as assignmentRepo from '../assignment/assignment.repository';
 import * as settingsRepo from '../settings/settings.repository';
+import * as settingsService from '../settings/settings.service';
 import { pool } from '../../database/pool';
 import { env } from '../../config/env';
 import * as customerRepo from '../customers/customer.repository';
@@ -13,9 +14,12 @@ import { propertyAssignmentService } from '../assignment/assignment.service';
 import * as repo from './lead.repository';
 import * as activityRepo from './lead-activity.repository';
 import type { ActivityRow } from './lead-activity.repository';
-import { recordAssigned, recordReceived, recordStatus, recordTimeout, recordTransferred } from './lead-activity.service';
-import { publishAssignment, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
+import { recordAssigned, recordComment, recordPropertyResolved, recordReceived, recordStatus, recordTimeout, recordTransferred } from './lead-activity.service';
+import { publishAssignment, publishCommentAdded, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
 import { toLeadDto, type EnquiryType, type LeadStatus, type StatusReasonCode } from './lead.model';
+import { matchProperty } from '../property-matching/property-matching.service';
+import * as mappingRepo from '../property-mappings/property-mapping.repository';
+import { normalizePropertyName } from '../property-matching/matching.policy';
 
 export interface NewLeadInput {
   name: string;
@@ -24,6 +28,9 @@ export interface NewLeadInput {
   /** Name as the portal sent it. Matched to an existing property, or a stub is created once. */
   propertyName: string;
   source: PropertySource;
+  externalPropertyId?: string | null;
+  externalPropertyName?: string | null;
+  externalPropertyUrl?: string | null;
   budget?: number | null;
   requirement?: string | null;
   /** Does the client want to rent or buy? Optional. */
@@ -61,8 +68,29 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
 
   try {
     const activities: ActivityRow[] = [];
+    const fallback = await settingsService.getUnmatchedPropertyRoutingSetting();
     const { leadId, notice } = await withTransaction(async (tx) => {
-      const property = await propertyRepo.findOrCreateStub(tx, input.propertyName);
+      const match = await matchProperty({
+        source,
+        propertyName: input.propertyName,
+        externalPropertyId: input.externalPropertyId,
+        externalPropertyName: input.externalPropertyName,
+        externalPropertyUrl: input.externalPropertyUrl,
+      }, tx);
+      const property = match.property
+        ? { id: match.property.id, created: false }
+        : await propertyRepo.findOrCreateStub(tx, input.propertyName);
+      if (!match.property && input.externalPropertyId) {
+        await mappingRepo.insertIfAbsent(tx, {
+          propertyId: property.id,
+          source,
+          externalId: input.externalPropertyId,
+          externalName: input.externalPropertyName ?? input.propertyName,
+          normalizedName: normalizePropertyName(input.externalPropertyName ?? input.propertyName),
+          url: input.externalPropertyUrl ?? null,
+          actorId: null,
+        });
+      }
       const customer = await customerRepo.upsertByMobile(tx, {
         name: input.name,
         mobile: input.mobile,
@@ -80,6 +108,14 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         externalLeadId,
         externalCreatedAt: input.externalCreatedAt ?? null,
         rawPayload: input.rawPayload,
+        externalPropertyId: input.externalPropertyId ?? null,
+        externalPropertyName: input.externalPropertyName ?? input.propertyName,
+        externalPropertyUrl: input.externalPropertyUrl ?? null,
+        propertyMatchStatus: match.status,
+        propertyMatchMethod: match.method,
+        propertyMatchConfidence: match.confidence,
+        propertyMatchCandidates: match.candidates,
+        propertyReviewManagerId: match.property ? null : fallback.mode === 'DESIGNATED_MANAGER' ? fallback.managerId : null,
       });
       activities.push(await recordReceived(tx, id, source, viewerId));
       if (input.assignTo) {
@@ -95,6 +131,10 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         });
         activities.push(...(await recordAssigned(tx, { leadId: id, executiveId: input.assignTo.executiveId, how: 'MANUAL', byId: input.assignTo.byId })));
         return { leadId: id, notice: undefined };
+      }
+      if (!match.property) {
+        const row = await propertyRepo.findById(property.id, tx);
+        return { leadId: id, notice: `Property requires review before this lead can be assigned. ${row?.name ?? input.propertyName}` };
       }
       const assignment = await propertyAssignmentService.assignLeadToProperty(property.id, id, tx);
       if (assignment) {
@@ -156,16 +196,33 @@ export async function assignPendingLeads(propertyId: string, tx: Db, assignedIds
  * One lead plus the client's other enquiries (their history: property, requirement, budget, date, executive,
  * status, notes). With `ownerId` (executive) opening the lead also clears its "New" indicator.
  */
-export async function getLeadDetail(id: string, ownerId?: string, managerId?: string, viewerId?: string, tz?: string) {
-  if (!(await repo.findById(id, ownerId, managerId))) throw new NotFoundError('Lead not found');
-  if (ownerId) await repo.markSeen(id, ownerId);
-  const lead = toLeadDto((await repo.findById(id, ownerId, managerId, viewerId))!, tz);
+export async function getLeadDetail(id: string, ownerId?: string, managerId?: string, viewerId?: string, tz?: string, historicalExecutiveId?: string) {
+  let visible = await repo.findById(id, ownerId, managerId);
+  const currentOwner = visible?.executive_id === ownerId;
+  if (!visible && historicalExecutiveId && (await repo.wasEverAssignedTo(id, historicalExecutiveId))) {
+    visible = await repo.findById(id);
+  }
+  if (!visible) throw new NotFoundError('Lead not found');
+  if (currentOwner) await repo.markSeen(id, ownerId!);
+  const lead = toLeadDto((await repo.findById(id, visible.executive_id === ownerId ? ownerId : undefined, managerId, viewerId))!, tz);
   const history = (await repo.listForCustomer(lead.customer.id, id, 50, viewerId)).map((r) => {
     const { customer: _c, ...entry } = toLeadDto(r, tz);
     return entry;
   });
   const activity = (await activityRepo.listForLead(id)).map(activityRepo.toActivityDto);
   return { ...lead, customerHistory: history, customerEnquiryCount: history.length + 1, activity };
+}
+
+export async function addComment(id: string, actor: { id: string; role: UserRole }, comment: string) {
+  const ownerId = actor.role === 'SALES' ? actor.id : undefined;
+  const managerId = actor.role === 'MANAGER' ? actor.id : undefined;
+  const activity = await withTransaction(async (tx) => {
+    const lead = await repo.lockForComment(tx, id, ownerId, managerId);
+    if (!lead) throw new NotFoundError('Lead not found');
+    return recordComment(tx, { leadId: id, comment, actorId: actor.id, executiveId: lead.executive_id });
+  });
+  await publishCommentAdded(id, [activity]);
+  return getLeadDetail(id, ownerId, managerId, actor.id);
 }
 
 /** Executive dashboard numbers: how many leads are new (unopened) and the split by status. */
@@ -179,6 +236,68 @@ export async function executiveSummary(executiveId: string) {
 }
 
 export const listLeads = async (f: repo.LeadFilters) => (await repo.list(f)).map((r) => toLeadDto(r, f.tz));
+
+export async function listUnmatchedPropertyLeads(f: repo.LeadFilters) {
+  return (await repo.list({ ...f, unresolvedProperty: true })).map((r) => toLeadDto(r, f.tz));
+}
+
+export async function propertyMatchCandidates(id: string) {
+  const lead = await repo.findById(id);
+  if (!lead) throw new NotFoundError('Lead not found');
+  const result = await matchProperty({
+    source: lead.source,
+    propertyName: lead.requested_property_name ?? lead.property_name,
+    externalPropertyId: lead.external_property_id,
+    externalPropertyName: lead.external_property_name,
+    externalPropertyUrl: lead.external_property_url,
+  });
+  return { lead: toLeadDto(lead), match: result };
+}
+
+async function resolveUnmatchedLead(id: string, propertyId: string, actorId: string, registerMapping: boolean, mappingOverrides?: { externalPropertyId?: string | null; externalPropertyName?: string | null; externalListingUrl?: string | null }) {
+  let assignedExecutiveId: string | null = null;
+  const activities: ActivityRow[] = [];
+  await withTransaction(async (tx) => {
+    const lead = await repo.lockForPropertyResolution(tx, id);
+    if (!lead) throw new NotFoundError('Lead not found');
+    if (!['UNMATCHED', 'AMBIGUOUS', 'CONFLICT'].includes(lead.property_match_status)) throw new AppError(409, 'Lead property is already resolved');
+    const property = await propertyRepo.findById(propertyId, tx);
+    if (!property) throw new NotFoundError('Property not found');
+    if (!property.is_active) throw new AppError(409, 'Property is inactive and cannot receive leads');
+    if (registerMapping) {
+      const externalId = mappingOverrides?.externalPropertyId ?? lead.external_property_id;
+      const externalName = mappingOverrides?.externalPropertyName ?? lead.external_property_name ?? lead.property_name;
+      if (externalId || externalName) {
+        const normalizedName = normalizePropertyName(externalName ?? property.name);
+        const url = mappingOverrides?.externalListingUrl ?? lead.external_property_url;
+        const moved = externalId
+          ? await mappingRepo.reassignActiveExternalId(tx, { source: lead.source, externalId, propertyId, externalName, normalizedName, url, actorId })
+          : false;
+        if (!moved) await mappingRepo.insert(tx, { propertyId, source: lead.source, externalId, externalName, normalizedName, url, actorId });
+      }
+    }
+    await repo.resolveProperty(tx, id, propertyId, actorId);
+    activities.push(await recordPropertyResolved(tx, { leadId: id, propertyName: property.name, actorId }));
+    if (!lead.executive_id) {
+      const assignment = await propertyAssignmentService.assignLeadToProperty(propertyId, id, tx);
+      if (assignment) {
+        await repo.markAssigned(tx, id, assignment.executiveId);
+        assignedExecutiveId = assignment.executiveId;
+        activities.push(...(await recordAssigned(tx, { leadId: id, executiveId: assignment.executiveId, how: 'ROUND_ROBIN' })));
+      }
+    }
+  });
+  if (assignedExecutiveId) await publishAssignment({ leadId: id, previousExecutiveId: null, reason: 'PENDING_ASSIGNED', activities });
+  return getLeadDetail(id, undefined, undefined, actorId);
+}
+
+export async function resolveLeadProperty(id: string, propertyId: string, actorId: string) {
+  return resolveUnmatchedLead(id, propertyId, actorId, false);
+}
+
+export async function registerLeadPropertyMapping(id: string, input: { propertyId: string; externalPropertyId?: string | null; externalPropertyName?: string | null; externalListingUrl?: string | null }, actorId: string) {
+  return resolveUnmatchedLead(id, input.propertyId, actorId, true, input);
+}
 
 /** Pass `ownerId` for executives: they can only see their own leads. */
 export async function getLead(id: string, ownerId?: string, viewerId?: string, tz?: string) {

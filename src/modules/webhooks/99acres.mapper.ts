@@ -59,12 +59,26 @@ export function map99acresPayload(payload: unknown): NewLeadInput {
   }
 
   const rawType = firstText(value, ['enquiryType', 'enquiry_type', 'enquiry', 'transactionType'])?.toUpperCase();
-  const enquiryType = rawType === undefined ? undefined : rawType === 'RENT' || rawType === 'LEASE' ? 'RENT' : rawType === 'BUY' || rawType === 'SALE' || rawType === 'SELL' ? 'BUY' : invalid('enquiryType', 'Enquiry type must be sale/buy or rental');
+  // 99acres sends compact codes: S (sale), R (rent), P (PG), L (lease).
+  // The current CRM canonical model has BUY/RENT only, so PG is retained as
+  // the rental side until a separate PG transaction type is introduced.
+  const enquiryType = rawType === undefined
+    ? undefined
+    : rawType === 'S' || rawType === 'BUY' || rawType === 'SALE' || rawType === 'SELL'
+      ? 'BUY'
+      : rawType === 'R' || rawType === 'P' || rawType === 'RENT' || rawType === 'LEASE' || rawType === 'L'
+        ? 'RENT'
+        : invalid('enquiryType', 'Enquiry type must be S (sale), R (rent), P (PG), L (lease), BUY or RENT');
   const message = firstText(value, ['message', 'comments', 'customerEnquiry', 'customer_enquiry']);
   if (message && message.length > 2000) invalid('message', 'Message is too long');
 
   const externalLeadId = firstText(value, ['externalLeadId', 'external_lead_id', 'leadId', 'lead_id']);
   if (externalLeadId && externalLeadId.length > 100) invalid('externalLeadId', 'External lead id is too long');
+
+  const externalPropertyId = firstText(value, ['externalPropertyId', 'external_property_id', 'propertyId', 'property_id', 'listingId', 'listing_id', 'listingPropertyId', 'listing_property_id']);
+  if (externalPropertyId && externalPropertyId.length > 200) invalid('externalPropertyId', 'External property id is too long');
+  const externalPropertyUrl = firstText(value, ['externalPropertyUrl', 'external_property_url', 'propertyUrl', 'property_url', 'listingUrl', 'listing_url']);
+  if (externalPropertyUrl && externalPropertyUrl.length > 1000) invalid('externalPropertyUrl', 'External property url is too long');
 
   const rawCreatedAt = firstText(value, ['createdAt', 'created_at', 'leadCreatedAt', 'lead_created_at']);
   let externalCreatedAt: Date | undefined;
@@ -78,6 +92,9 @@ export function map99acresPayload(payload: unknown): NewLeadInput {
     mobile,
     email,
     propertyName,
+    externalPropertyId,
+    externalPropertyName: propertyName,
+    externalPropertyUrl,
     source: '99ACRES',
     enquiryType,
     message,

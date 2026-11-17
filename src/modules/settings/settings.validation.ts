@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { ASSIGNMENT_RULES, MAX_LEAD_TIMEOUT_MINUTES, MIN_LEAD_TIMEOUT_MINUTES } from '../assignment/assignment.rules';
 
+export const unmatchedPropertyRoutingSchema = z.strictObject({
+  mode: z.enum(['ADMIN_QUEUE', 'DESIGNATED_MANAGER']),
+  managerId: z.uuid('Invalid manager id').nullable().optional(),
+});
+
 export const updateAssignmentRuleSchema = z.strictObject({
   rule: z.enum(ASSIGNMENT_RULES, { error: `Rule must be one of: ${ASSIGNMENT_RULES.join(', ')}` }),
 });

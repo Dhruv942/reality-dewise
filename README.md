@@ -111,15 +111,20 @@ Validated at startup by `src/config/env.ts` (the server refuses to start on bad 
 │       ├── users/                # shared user table access
 │       ├── executives/           # account management shared by sales users and managers (one service, two roles)
 │       ├── managers/             # /admin/managers routes (reuse the executives service)
-│       ├── properties/           # properties: list/edit, pick executives (created by leads)
+│       ├── properties/           # properties: structured fields, list/edit, pick executives (created by leads)
+│       ├── property-mappings/    # portal listing IDs and verified aliases → internal properties
+│       ├── property-matching/    # exact-ID, alias, normalized-name and conservative fuzzy matching
+│       ├── projects/             # Admin project master data and archival
+│       ├── inventory/            # Admin inventory/unit master data and lifecycle
 │       ├── assignment/           # assignment engine (rules + strategies, round robin) + assignment history
-│       ├── settings/             # admin-only system settings (the lead assignment rule)
+│       ├── settings/             # admin-only system settings (assignment, SLA and unmatched-property routing)
+│       ├── reports/               # scoped lead analytics and CSV/Excel-compatible exports
 │       ├── customers/            # clients: one per mobile number, with enquiry history
 │       ├── leads/                # lead creation flow, status, executive "new lead" tracking
 │       ├── admin/admin.routes.ts # mounts every admin module under /api/v1/admin (ADMIN only)
 │       ├── manager-portal/       # /api/v1/manager: a manager's executives, leads, lead assignment and property executive lists (MANAGER only)
 │       └── executive-portal/     # /api/v1/executive: a sales user's own leads (SALES only)
-├── migrations/                   # numbered SQL migrations (001 … 014)
+   ├── migrations/                   # numbered SQL migrations (001 … 030)
 ├── seed/seed-users.ts            # creates the first admin, an optional manager and up to 3 executives (the executives report to the manager)
 ├── tests/                        # integration tests (real HTTP + real Postgres)
 ├── public/test-console.html      # dev-only manual API tester
@@ -147,10 +152,12 @@ To add a feature: create the folder with these files, then mount its router in `
 ## How the system works
 
 ```
-Lead received (name, mobile, propertyName, source, requirement, budget …)
+Lead received (name, mobile, propertyName, source, portal property ID/name, requirement, budget …)
    │
    ├─ 1. Client:    find by mobile, or create. Never duplicated; the name is not used for matching
-   ├─ 2. Property:  find by normalised name, or create ONE stub. Never one per lead
+   ├─ 2. Property:  exact portal ID → registered portal alias → normalized name → conservative fuzzy candidate
+   │       ├─ reliable match → existing property and its executive round robin
+   │       └─ no/ambiguous match → one unresolved stub, durable review queue, no automatic assignment
    ├─ 3. Lead:      saved with clientId + propertyId
    ├─ 4. Assign:    round-robin over the executives picked for that property (active ones only)
    │       ├─ someone available → status INCOMING, executive notified through the dashboard
@@ -160,6 +167,22 @@ Lead received (name, mobile, propertyName, source, requirement, budget …)
    ├─ 5. Executive opens the lead → current enquiry + the client's full history
    └─ 6. Still INCOMING after the SLA (90 min by default, 24/7, admin-set)? → reassigned to the next executive, repeating until someone handles it
 ```
+
+### Portal matching and unresolved-property review
+
+`portal_property_mappings` keeps an external listing identity separate from the internal property ID. One property may have mappings for both 99acres and Magicbricks. Active `(portal, externalPropertyId)` and `(portal, normalized alias)` values are unique. Matching always prefers an exact external ID, then a registered alias/name, then an exact normalized property name; fuzzy matching is only accepted when one candidate clears the central threshold and margin. Ambiguous candidates are never auto-assigned.
+
+Unmatched leads remain `PENDING_ASSIGNMENT` and are listed at `GET /api/v1/admin/leads/unmatched-properties`. Admins can inspect candidates with `GET /api/v1/admin/leads/:id/property-match-candidates`, resolve to an existing property with `POST /api/v1/admin/leads/:id/resolve-property`, or resolve and register the portal mapping with `POST /api/v1/admin/leads/:id/register-property-mapping` and `{ "propertyId": "..." }`. Resolution preserves the lead/activity history and invokes the existing property round robin once. Repeated portal deliveries reuse the same placeholder mapping when an external property ID is available.
+
+The fallback setting accepts `{ "mode": "ADMIN_QUEUE" }` or `{ "mode": "DESIGNATED_MANAGER", "managerId": "..." }` at `PUT /api/v1/admin/settings/unmatched-property-routing`. Admin queue is the safe default; a designated manager must be active. Teams are not used.
+
+### Reports, analytics and exports
+
+Report endpoints accept the shared optional filters `fromDate`, `toDate`, `managerId`, `executiveId`, `source`, `status`, `projectId`, `propertyId`, `transactionType`, `propertyCategory`, `location`, `minPrice`, `maxPrice`, `priceBand`, `tz`, `limit` and `offset`. Dates are inclusive by calendar day and converted using `tz` (default `UTC`); the database query uses an exclusive next-day boundary. Unknown query parameters, invalid ranges, negative prices and invalid timezones are rejected.
+
+`overview` returns summary cards and breakdowns by status, source, executive, manager, project, property, transaction type, property category, location and price band. `leads` returns paginated business rows without customer phone/email. `executives` separates current ownership from assignment events during the period and counts transfers/timeouts. `managers`, `sources`, `properties`, `transactions` and `follow-ups` provide their respective aggregates. Property lead counts are distinct lead counts and are not multiplied by inventory units.
+
+Use `format=csv` or `format=excel` on any report endpoint to download the same filtered lead dataset. CSV is `text/csv`; Excel is an Excel-compatible tab-separated `.xls` download. Spreadsheet formula prefixes are escaped. The current schema stores only the next follow-up, so completed follow-ups and conversion rates are not fabricated; the follow-up report explicitly reports that completion history is unavailable. Current lead sources are `99ACRES` and `MAGICBRICKS`; unsupported manual source categories are not invented.
 
 - **Roles:** `ADMIN` (everything under `/admin`, creates every account), `MANAGER` (`/manager`: looks after the sales users whose `managerId` is them, assigns leads and properties to them) and `SALES` (`/executive`: works their own leads). A separate `designation` (`MANAGER`, `SALES_EXECUTIVE`, `EXECUTIVE_MANAGER`) labels users: **Sales Executive and Executive Manager are the same role with identical permissions**. Tokens are role-bound, users sign in with email or username, and changing a password invalidates older tokens.
 - **Lead statuses:** `INCOMING → RINGING → CONNECTED → CLOSED / LOST / BROKER` (any order), plus the system status `PENDING_ASSIGNMENT`.
@@ -175,16 +198,51 @@ Base path `/api/v1`. All errors look like `{ "success": false, "message": "…",
 | Managers | `/admin/managers` (CRUD, status, password) | admin |
 | Sales executives | `/admin/executives` (CRUD incl. `designation`, `managerId`, status, password; `PATCH/DELETE /:id/manager` sets or clears the manager) | admin |
 | Properties | `/admin/properties` (list, get, edit, status, `PUT :id/executives`, assignment history) | admin |
+| Projects | `/admin/projects` (list/search, create, get with related properties, edit, archive) | admin |
+| Inventory | `/admin/inventory` (list/filter, create, get, edit, archive, status) | admin |
+| Portal mappings | `/admin/property-mappings` (list, create, view, update, deactivate), `/admin/properties/:id/mappings` | admin |
 | Clients | `/admin/customers` (list, get with all enquiries, edit) | admin |
-| Leads | `/admin/leads` (create, list, get + client history, status, `:id/assign`) | admin |
-| Settings | `GET` / `PUT` `/admin/settings/assignment-rule` (default `ROUND_ROBIN`) and `/admin/settings/lead-timeout` (SLA, default 90 minutes) | admin only |
-| Manager portal | `/manager/executives` (list, get), `/manager/leads` (list, get, `:id/assign`), `/manager/properties` (list, get, `PUT :id/executives`: only their own executives' part of the list) | manager |
-| Executive portal | `/executive/leads` (list, `summary`, get, status) | sales executive / executive manager |
+| Leads | `/admin/leads` (create, list, get + client history/activity, `:id/comments`, status, `:id/assign`) | admin |
+| Settings | `GET` / `PUT` `/admin/settings/assignment-rule` (default `ROUND_ROBIN`), `/admin/settings/lead-timeout` (SLA, default 90 minutes), `/admin/settings/unmatched-property-routing` | admin only |
+| Reports | `/admin/reports/{overview,leads,executives,managers,sources,properties,transactions,follow-ups}`; scoped equivalents under `/manager/reports` and `/executive/reports` | admin / manager / sales |
+| Manager portal | `/manager/executives` (list, get), `/manager/leads` (list, get, `:id/comments`, `:id/assign`), `/manager/properties` (list, get, `PUT :id/executives`: only their own executives' part of the list) | manager |
+| Executive portal | `/executive/leads` (list, `summary`, get, `:id/comments`, status) | sales executive / executive manager; previously assigned executives can read historical lead activity |
 | Important leads | `POST` / `DELETE` `…/leads/:id/important` in each portal; `isImportant` on every lead, `?important=true` filter | admin, manager, sales |
 | Personal notes | `GET` / `POST /notes`, `GET` / `PATCH` / `DELETE /notes/:id` (`?search`, `limit`, `offset`) | any logged-in user (own notes only) |
 | Notifications | `GET /notifications` (`?unread=true`, `limit`, `offset`; includes `unreadCount`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` | any logged-in user (own notifications only) |
 | Web Push | `GET /push/public-key`, `POST /push/subscriptions`, `DELETE /push/subscriptions` (own devices only). See `docs/FRONTEND_PUSH_GUIDE.md` | any logged-in user |
 | Health | `GET /health` | public |
+
+### Project and inventory examples
+
+Create a project:
+
+```http
+POST /api/v1/admin/projects
+Content-Type: application/json
+
+{"name":"Rustomjee Elita","location":"Thane","description":"Residential development"}
+```
+
+The response includes a server-generated code such as `PRJ-2026-000001`. Link an existing property with structured attributes through the existing property update endpoint:
+
+```http
+PATCH /api/v1/admin/properties/{propertyId}
+Content-Type: application/json
+
+{"projectId":"{projectId}","transactionType":"SALE_PURCHASE","propertyType":"RESIDENTIAL","minPrice":15000000,"maxPrice":18000000}
+```
+
+Create a unit:
+
+```http
+POST /api/v1/admin/inventory
+Content-Type: application/json
+
+{"propertyId":"{propertyId}","name":"Flat 1204","minPrice":15000000,"maxPrice":18000000,"availableFrom":"2026-12-01"}
+```
+
+Inventory returns a ten-digit server-generated `inventoryCode`, for example `2600000001`. Inventory uses the parent property's executive pool; creating or editing inventory never resets lead round-robin state. Inventory status values are `AVAILABLE`, `RESERVED`, `SOLD`, `RENTED`, `EXPIRED` and `INACTIVE`. Bulk reassignment, configurable statuses, advanced report exports beyond the documented CSV/Excel-compatible formats, teams and a frontend remain intentionally deferred.
 
 ### Real-time (Socket.IO)
 

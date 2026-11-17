@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { UnauthorizedError } from '../../utils/errors';
 import { parse } from '../../utils/validate';
 import * as service from './lead.service';
-import { idParam, listLeadsQuery, tzQuery } from './lead.validation';
+import { idParam, listLeadsQuery, registerPropertyMappingSchema, resolvePropertySchema, tzQuery } from './lead.validation';
 
 const id = (req: Request) => parse(idParam, req.params).id;
 /** Optional `?tz=` (IANA zone) that decides where "today" is for follow-up states. */
@@ -23,6 +23,18 @@ export const adminCreate = async (req: Request, res: Response) => {
   const { created, lead, notice } = await service.createLead(req.body, self(req));
   res.status(created ? 201 : 200).json(notice ? { ...lead, notice } : lead);
 };
+export const adminUnmatchedProperties = async (req: Request, res: Response) => {
+  res.json(await service.listUnmatchedPropertyLeads({ ...parse(listLeadsQuery, req.query), viewerId: self(req) }));
+};
+export const propertyMatchCandidates = async (req: Request, res: Response) => {
+  res.json(await service.propertyMatchCandidates(id(req)));
+};
+export const resolveProperty = async (req: Request, res: Response) => {
+  res.json(await service.resolveLeadProperty(id(req), parse(resolvePropertySchema, req.body).propertyId, self(req)));
+};
+export const registerPropertyMapping = async (req: Request, res: Response) => {
+  res.json(await service.registerLeadPropertyMapping(id(req), parse(registerPropertyMappingSchema, req.body), self(req)));
+};
 // ---- manager: add a lead and give it to one of their executives in one step ----
 export const managerCreate = async (req: Request, res: Response) => {
   const { executiveId, ...input } = req.body;
@@ -41,7 +53,7 @@ export const myList = async (req: Request, res: Response) => {
   res.json(await service.listLeads({ ...q, executiveId: self(req), forExecutive: true, viewerId: self(req) }));
 };
 export const myGet = async (req: Request, res: Response) => {
-  res.json(await service.getLeadDetail(id(req), self(req), undefined, self(req), tz(req)));
+  res.json(await service.getLeadDetail(id(req), self(req), undefined, self(req), tz(req), self(req)));
 };
 export const mySummary = async (req: Request, res: Response) => {
   res.json(await service.executiveSummary(self(req)));
@@ -86,4 +98,8 @@ export const setFollowUp = async (req: Request, res: Response) => {
 };
 export const clearFollowUp = async (req: Request, res: Response) => {
   res.json(await service.setFollowUp(id(req), actor(req), { followUpAt: null }, tz(req)));
+};
+
+export const addComment = async (req: Request, res: Response) => {
+  res.json(await service.addComment(id(req), actor(req), req.body.comment));
 };

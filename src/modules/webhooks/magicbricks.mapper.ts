@@ -69,6 +69,11 @@ export function mapMagicbricksPayload(payload: unknown): NewLeadInput {
   const externalLeadId = firstText(value, ['externalLeadId', 'external_lead_id', 'leadId', 'lead_id']);
   if (externalLeadId && externalLeadId.length > 100) invalid('externalLeadId', 'External lead id is too long');
 
+  const externalPropertyId = firstText(value, ['externalPropertyId', 'external_property_id', 'propertyId', 'property_id', 'listingId', 'listing_id', 'listingPropertyId', 'listing_property_id']);
+  if (externalPropertyId && externalPropertyId.length > 200) invalid('externalPropertyId', 'External property id is too long');
+  const externalPropertyUrl = firstText(value, ['externalPropertyUrl', 'external_property_url', 'propertyUrl', 'property_url', 'listingUrl', 'listing_url']);
+  if (externalPropertyUrl && externalPropertyUrl.length > 1000) invalid('externalPropertyUrl', 'External property url is too long');
+
   const rawCreatedAt = firstText(value, ['createdAt', 'created_at', 'leadCreatedAt', 'lead_created_at']);
   let externalCreatedAt: Date | undefined;
   if (rawCreatedAt !== undefined) {
@@ -81,6 +86,9 @@ export function mapMagicbricksPayload(payload: unknown): NewLeadInput {
     mobile,
     email,
     propertyName,
+    externalPropertyId,
+    externalPropertyName: propertyName,
+    externalPropertyUrl,
     source: 'MAGICBRICKS',
     enquiryType,
     message,

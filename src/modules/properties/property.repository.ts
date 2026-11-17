@@ -8,12 +8,14 @@ import type { PropertyExecutiveRow, PropertyRow } from './property.model';
 const NAME_KEY = (param: string) => `lower(regexp_replace(btrim(${param}), '\\s+', ' ', 'g'))`;
 
 const SELECT = `
-  SELECT p.id, p.name, p.description, p.location, p.is_active, p.is_stub, p.created_at, p.updated_at,
+  SELECT p.id, p.name, p.description, p.location, p.project_id, p.transaction_type, p.property_type,
+         p.min_price, p.max_price, p.currency, p.price_band, p.is_active, p.is_stub, p.archived_at, p.created_at, p.updated_at,
          (SELECT count(*)::int FROM property_executives pe
             JOIN users u ON u.id = pe.executive_id AND u.deleted_at IS NULL
             WHERE pe.property_id = p.id) AS executive_count,
          (SELECT count(*)::int FROM leads l
-            WHERE l.property_id = p.id AND l.status = 'PENDING_ASSIGNMENT') AS pending_lead_count
+            WHERE l.property_id = p.id AND l.status = 'PENDING_ASSIGNMENT') AS pending_lead_count,
+         (SELECT count(*)::int FROM inventory i WHERE i.property_id = p.id) AS inventory_count
   FROM properties p`;
 
 export const findById = async (id: string, db: Db = pool): Promise<PropertyRow | null> =>
@@ -21,6 +23,13 @@ export const findById = async (id: string, db: Db = pool): Promise<PropertyRow |
 
 export const findByName = async (name: string, db: Db = pool): Promise<PropertyRow | null> =>
   (await db.query<PropertyRow>(`${SELECT} WHERE p.name_key = ${NAME_KEY('$1')}`, [name])).rows[0] ?? null;
+
+/** Matches punctuation-insensitively for the property matcher; returns all candidates so ambiguity is visible. */
+export async function findByNormalizedPortalName(name: string, db: Db = pool): Promise<PropertyRow[]> {
+  const expression = `lower(regexp_replace(regexp_replace(btrim(p.name), '[^[:alnum:]]+', ' ', 'g'), '\\s+', ' ', 'g'))`;
+  const target = `lower(regexp_replace(regexp_replace(btrim($1), '[^[:alnum:]]+', ' ', 'g'), '\\s+', ' ', 'g'))`;
+  return (await db.query<PropertyRow>(`${SELECT} WHERE ${expression} = ${target}`, [name])).rows;
+}
 
 /**
  * The one place a property is created from a lead. ON CONFLICT on the unique normalised name makes it
@@ -39,7 +48,7 @@ export async function findOrCreateStub(db: Db, name: string): Promise<{ id: stri
   return { id: rows[0].id, created: false };
 }
 
-export async function list(f: { isActive?: boolean; assigned?: boolean; search?: string }): Promise<PropertyRow[]> {
+export async function list(f: { isActive?: boolean; assigned?: boolean; search?: string; projectId?: string; transactionType?: string; propertyType?: string; status?: string }): Promise<PropertyRow[]> {
   const where: string[] = [];
   const params: unknown[] = [];
   if (f.isActive !== undefined) where.push(`p.is_active = $${params.push(f.isActive)}`);
@@ -48,6 +57,11 @@ export async function list(f: { isActive?: boolean; assigned?: boolean; search?:
     where.push(`(p.name ILIKE ${s} OR p.location ILIKE ${s})`);
   }
   if (f.assigned !== undefined) where.push(`p.executive_count ${f.assigned ? '>' : '='} 0`);
+  if (f.projectId) where.push(`p.project_id = $${params.push(f.projectId)}`);
+  if (f.transactionType) where.push(`p.transaction_type = $${params.push(f.transactionType)}`);
+  if (f.propertyType) where.push(`p.property_type = $${params.push(f.propertyType)}`);
+  if (f.status === 'ARCHIVED') where.push('p.archived_at IS NOT NULL');
+  if (f.status === 'ACTIVE') where.push('p.archived_at IS NULL');
   const sql = `SELECT * FROM (${SELECT}) p ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
                ORDER BY lower(p.name), p.id`;
   return (await pool.query<PropertyRow>(sql, params)).rows;
@@ -55,7 +69,7 @@ export async function list(f: { isActive?: boolean; assigned?: boolean; search?:
 
 export const updateDetails = (
   id: string,
-  f: { name?: string; description?: string | null; location?: string | null; is_active?: boolean },
+  f: { name?: string; description?: string | null; location?: string | null; is_active?: boolean; archived_at?: Date | null; project_id?: string | null; transaction_type?: string | null; property_type?: string | null; min_price?: number | null; max_price?: number | null; currency?: string; price_band?: string | null },
 ) => patchRow('properties', id, f);
 
 export async function listExecutives(propertyId: string, db: Db = pool): Promise<PropertyExecutiveRow[]> {

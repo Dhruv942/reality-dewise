@@ -23,6 +23,12 @@ HTTP request
 - **Managers and their executives:** a sales user points straight at their manager through `users.manager_id` (only SALES users have one; admins set it on the executive, and a manager never has a manager). A manager's reach is derived from it: *their* sales users = users where `manager_id` is them. There are no teams. A manager may edit only their own executives' part of a property's rotation list.
 - **Auth:** each role signs in through its own endpoint (admin, manager, executive) with email or username, and gets a JWT carrying the role. The role guard rejects the wrong role with `403`. Passwords are hashed with argon2. `users.password_changed_at` invalidates tokens issued before a password change. There are no refresh tokens (1 h expiry).
 - **Soft delete:** executives are never hard-deleted (`users.deleted_at`). History (leads, assignments) keeps pointing at them.
+- **Projects, properties and inventory:** `projects` are optional parent master records. Existing `properties` remain the lead-facing/listing entity and may be standalone or linked to one project. `inventory` records are optional units linked to a property; they do not replace properties and do not create a second lead-assignment system. Inventory uses the parent property's executive pool and never changes the property's round-robin state when metadata changes.
+- **Portal property identity:** `portal_property_mappings` links a portal source plus its external listing ID/name to one internal property. Matching priority is exact external ID, registered alias, normalized property name, then conservative fuzzy candidates. Ambiguous candidates remain visible for Admin review; an internal property ID is never treated as a portal ID.
+- **Reports:** `src/modules/reports` queries the existing leads, users, properties, projects, inventory, follow-up and assignment-history tables. It exposes scoped overview, lead, executive, manager, source, property, transaction and follow-up reports under each role's existing portal. Filters use inclusive local dates with an exclusive next-day boundary in the requested IANA timezone (UTC by default). The report service applies manager/executive scope in SQL, so query parameters cannot broaden visibility. CSV and Excel-compatible tab-separated exports use the same filtered lead dataset and escape spreadsheet formulas.
+- **Reports:** `src/modules/reports` queries the existing leads, users, properties, projects, inventory, follow-up and assignment-history tables. It exposes scoped overview, lead, executive, manager, source, property, transaction and follow-up reports under each role's existing portal. Filters use inclusive local dates with an exclusive next-day boundary in the requested IANA timezone (UTC by default). The report service applies manager/executive scope in SQL, so query parameters cannot broaden visibility. CSV and Excel-compatible tab-separated exports use the same filtered lead dataset and escape spreadsheet formulas.
+- **Codes and price policy:** projects receive `PRJ-YYYY-######` codes from a PostgreSQL sequence. Inventory receives a ten-digit `YY########` code from a PostgreSQL sequence; codes are never derived from `MAX(id)` and are not reused. Money is stored as PostgreSQL `numeric(14,2)` in INR by default. Price bands are classified centrally as Thousands, Lakhs, up to ₹2 crore, above ₹2–4 crore, above ₹4–6 crore, above ₹6–8 crore, above ₹8 crore; missing values are `UNKNOWN` and ranges crossing bands are `MIXED`.
+- **Inventory lifecycle:** `AVAILABLE` and `RESERVED` can move through normal reservation/sale/rental/expiry/inactive paths. `SOLD` is terminal except explicit inactive correction, while `RENTED`, `EXPIRED` and `INACTIVE` require an explicit transition to become available again. Archived/inactive properties and projects cannot receive new inventory.
 
 ## 2. Database
 
@@ -48,6 +54,11 @@ PostgreSQL, SQL migrations in `migrations/` (applied in numeric order, tracked i
 | 021 | `personal_notes`: private notepad per user (`user_id` CASCADE); admins and managers cannot read another user's notes |
 | 022 | lead transfers: `TRANSFER` assignment history, optional reason, and `TRANSFERRED` activity type |
 | 023 | adds the `INVALID` lead status and persisted `LOST`/`INVALID` status reasons, including a 20-character custom `OTHER` value |
+| 026 | adds projects, structured property attributes, inventory units, safe project/inventory code sequences and lifecycle indexes |
+| 027 | backfills archive timestamps for legacy inactive properties |
+| 028 | portal property mappings, lead property-match metadata, unresolved-property routing setting and resolution activity |
+| 029 | future portal-source enum compatibility for property mappings |
+| 030 | reporting indexes for lead filters, follow-ups and assignment-history queries |
 
 ```mermaid
 erDiagram
@@ -93,6 +104,8 @@ One database **transaction** covers everything, so a lead is never stored half-p
 6. Assigned → `markAssigned` sets `status = INCOMING`, `assigned_at = now()`, `seen_at = NULL`. Nobody available → the lead stays `PENDING_ASSIGNMENT` and the response carries a `notice`.
 7. An **inactive property** rejects the lead with `409` and the transaction rolls back (nothing is stored).
 
+For portal leads, property matching runs before the existing assignment step: exact external mapping, registered alias, normalized name, then conservative fuzzy candidates. Reliable matches use the existing property executive pool and round robin unchanged. Unknown or ambiguous listings create/reuse one unresolved stub, retain the portal identity, and stay `PENDING_ASSIGNMENT` until Admin review. The Admin resolution endpoints can link a lead to a verified property, move a placeholder mapping, record `PROPERTY_RESOLVED`, and invoke the same assignment service. Teams are not involved.
+
 **Manual assignment** (`lead.service.ts → assignLead`, `PATCH /admin/leads/:id/assign` and `PATCH /manager/leads/:id/assign`): an admin may give any lead to any active SALES user; a manager only leads in their scope (their executives' leads plus `PENDING_ASSIGNMENT` ones) and only to SALES users whose `manager_id` is them (otherwise 403). It reassigns the lead, resets `assigned_at`/`seen_at` so it is "new" for the receiver, moves a pending lead to `INCOMING` (other statuses are kept), and writes a `MANUAL` history row with `assigned_by_id`. It does not touch the round-robin pointer. The "one assignment per lead" unique index applies to `ROUND_ROBIN` rows only.
 
 **When an admin sets a property's executives** (`PUT /admin/properties/:id/executives`), the list is replaced and `assignPendingLeads` assigns that property's waiting leads, oldest first, through the same round-robin, in the same transaction.
@@ -124,6 +137,8 @@ One database **transaction** covers everything, so a lead is never stored half-p
 
 - **No push notifications:** the dashboard polls. Server-sent events (single instance) or Postgres `LISTEN/NOTIFY` (multiple instances) would add real-time delivery.
 - **Magicbricks webhook:** `POST /api/v1/webhooks/magicbricks/leads` is intentionally unauthenticated because Magicbricks supplies only a URL. It uses a strict route-local parser, rate limiting, provisional field mapping, and the same `createLead()` transaction and `(source, externalLeadId)` idempotency constraint as the admin API. The URL alone does not authenticate the sender; see `docs/MAGICBRICKS_WEBHOOK.md` for residual risk and vendor confirmation requirements.
-- **Lead statuses have no enforced order**, and there is no activity or notes timeline (only the lead's `message`).
+- **Lead statuses have no enforced order.** Lead comments, assignment changes and property resolution are retained in the activity timeline; personal notes remain private to their author.
 - **Auth:** no refresh tokens, no password-reset flow.
 - **Pagination** returns plain arrays without a total count.
+- **Report history:** assignment history is available, but lead status history is not stored as structured snapshots. The executive report therefore reports current status and assignment events, not historical status-at-time. Follow-up storage currently contains only the next follow-up, so completed-follow-up counts are explicitly unavailable. Conversion rates are not fabricated.
+- **Report exports:** `format=csv` returns CSV; `format=excel` returns an Excel-compatible tab-separated `.xls` file without adding a heavyweight spreadsheet dependency. Exports are capped at 10,000 filtered lead rows and intentionally omit customer PII.

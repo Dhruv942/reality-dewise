@@ -1,7 +1,7 @@
 import { pool } from '../../database/pool';
 import type { Db } from '../../database/transaction';
 
-export const ACTIVITY_TYPES = ['LEAD_RECEIVED', 'ASSIGNED', 'TRANSFERRED', 'SLA_STARTED', 'STATUS_CHANGED', 'SLA_BREACHED', 'AUTO_REASSIGNED'] as const;
+export const ACTIVITY_TYPES = ['LEAD_RECEIVED', 'ASSIGNED', 'TRANSFERRED', 'SLA_STARTED', 'STATUS_CHANGED', 'SLA_BREACHED', 'AUTO_REASSIGNED', 'COMMENT_ADDED', 'PROPERTY_RESOLVED'] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
 export interface ActivityRow {

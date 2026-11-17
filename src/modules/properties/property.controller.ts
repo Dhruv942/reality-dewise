@@ -18,6 +18,9 @@ export const update = async (req: Request, res: Response) => {
 export const setStatus = async (req: Request, res: Response) => {
   res.json(await service.setPropertyStatus(id(req), req.body.isActive));
 };
+export const archive = async (req: Request, res: Response) => {
+  res.json(await service.setPropertyStatus(id(req), false));
+};
 export const setExecutives = async (req: Request, res: Response) => {
   res.json(await service.setExecutives(id(req), req.body.executiveIds));
 };

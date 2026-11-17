@@ -302,3 +302,12 @@ export const publishStatusUpdated = (s: { leadId: string; previousStatus: LeadSt
       });
     }
   });
+
+export const publishCommentAdded = (leadId: string, activities: ActivityRow[] = []) =>
+  safely('lead comment', async () => {
+    const row = await repo.findById(leadId);
+    if (!row) return;
+    const managers = row.executive_id ? await managersOf([row.executive_id]) : [];
+    const recipients = [rooms.admin, ...(row.executive_id ? [rooms.executive(row.executive_id), ...managers.map(rooms.manager)] : [rooms.managers])];
+    emitActivities(recipients, activities);
+  });

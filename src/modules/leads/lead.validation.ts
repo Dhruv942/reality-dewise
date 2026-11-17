@@ -10,6 +10,9 @@ export const createLeadSchema = z.strictObject({
   mobile: customerMobile,
   email: customerEmail.nullish(),
   propertyName: z.string({ error: 'Property name is required' }).trim().min(1, 'Property name is required').max(200),
+  externalPropertyId: z.string().trim().min(1).max(200).nullish(),
+  externalPropertyName: z.string().trim().max(300).nullish(),
+  externalPropertyUrl: z.url().max(1000).nullish(),
   // The portal the enquiry came from. A property is one record regardless of portal; source is per lead.
   source: z
     .string({ error: 'Source is required' })
@@ -61,6 +64,7 @@ export const listLeadsQuery = z.object({
   status: filterStatus.optional(),
   statusReason: z.enum(STATUS_REASONS).optional(),
   propertyId: z.uuid('Invalid property id').optional(),
+  propertyMatchStatus: z.enum(['MATCHED', 'UNMATCHED', 'AMBIGUOUS', 'RESOLVED', 'CONFLICT']).optional(),
   executiveId: z.uuid('Invalid executive id').optional(),
   customerId: z.uuid('Invalid customer id').optional(),
   // Only the leads you marked important (true) or did not (false).
@@ -82,10 +86,25 @@ export const transferLeadSchema = z.strictObject({
   reason: z.string().trim().max(500, 'Reason must be at most 500 characters').optional(),
 });
 
+export const commentSchema = z.strictObject({
+  comment: z.string({ error: 'Comment is required' }).trim().min(1, 'Comment is required').max(2000, 'Comment must be at most 2000 characters'),
+});
+
 /** `followUpAt: null` clears the follow-up (and its note). The date must carry an offset, e.g. 2026-10-12T10:30:00+05:30. */
 export const followUpSchema = z.strictObject({
   followUpAt: z.union([z.iso.datetime({ offset: true, error: 'followUpAt must be an ISO date-time with offset, or null' }), z.null()], {
     error: 'followUpAt must be an ISO date-time with offset, or null',
   }),
   followUpNote: z.string({ error: 'followUpNote must be text' }).trim().max(500, 'followUpNote must be at most 500 characters').nullish(),
+});
+
+export const resolvePropertySchema = z.strictObject({
+  propertyId: z.uuid('Invalid property id'),
+});
+
+export const registerPropertyMappingSchema = z.strictObject({
+  propertyId: z.uuid('Invalid property id'),
+  externalPropertyId: z.string().trim().min(1).max(200).nullish(),
+  externalPropertyName: z.string().trim().max(300).nullish(),
+  externalListingUrl: z.url().max(1000).nullish(),
 });

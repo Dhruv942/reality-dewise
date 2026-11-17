@@ -7,6 +7,7 @@ import { executiveService } from '../executives/executive.service';
 import { idParam, listExecutivesQuery } from '../executives/executive.validation';
 import { managerLeadRouter } from '../leads/lead.routes';
 import { managerPropertyRouter } from '../properties/property.routes';
+import { reportRouter } from '../reports/report.routes';
 
 /** Everything under /api/v1/manager requires an authenticated MANAGER. */
 export const managerPortalRouter = Router();
@@ -30,3 +31,4 @@ managerPortalRouter.get('/executives/:id', async (req: Request, res: Response) =
 });
 managerPortalRouter.use('/leads', managerLeadRouter);
 managerPortalRouter.use('/properties', managerPropertyRouter);
+managerPortalRouter.use('/reports', reportRouter);

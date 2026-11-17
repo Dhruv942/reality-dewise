@@ -27,6 +27,14 @@ export interface LeadRow {
   budget: string | null; // numeric comes back from pg as a string
   requested_property_name: string | null;
   external_lead_id: string | null;
+  external_property_id: string | null;
+  external_property_name: string | null;
+  external_property_url: string | null;
+  property_match_status: 'MATCHED' | 'UNMATCHED' | 'AMBIGUOUS' | 'RESOLVED' | 'CONFLICT';
+  property_match_method: string | null;
+  property_match_confidence: string | null;
+  property_match_candidates: unknown;
+  property_review_manager_id: string | null;
   source: PropertySource;
   created_at: Date;
   updated_at: Date;
@@ -87,6 +95,18 @@ export const toLeadDto = (l: LeadRow, tz = 'UTC') => ({
   budget: l.budget === null ? null : Number(l.budget),
   requestedPropertyName: l.requested_property_name,
   externalLeadId: l.external_lead_id,
+  externalProperty: {
+    id: l.external_property_id,
+    name: l.external_property_name,
+    url: l.external_property_url,
+  },
+  propertyMatch: {
+    status: l.property_match_status,
+    method: l.property_match_method,
+    confidence: l.property_match_confidence === null ? null : Number(l.property_match_confidence),
+    candidates: l.property_match_candidates ?? [],
+    reviewManagerId: l.property_review_manager_id,
+  },
   source: l.source,
   customer: { id: l.customer_id, name: l.customer_name, mobile: l.customer_mobile, email: l.customer_email },
   // The property the customer is asking about.

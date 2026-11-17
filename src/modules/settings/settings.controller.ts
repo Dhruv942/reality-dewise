@@ -17,3 +17,10 @@ export const updateLeadTimeout = async (req: Request, res: Response) => {
   if (!req.user) throw new UnauthorizedError();
   res.json(await service.setLeadTimeoutMinutes(req.body.minutes, req.user.id));
 };
+export const getUnmatchedRouting = async (_req: Request, res: Response) => {
+  res.json(await service.getUnmatchedPropertyRoutingSetting());
+};
+export const updateUnmatchedRouting = async (req: Request, res: Response) => {
+  if (!req.user) throw new UnauthorizedError();
+  res.json(await service.setUnmatchedPropertyRouting(req.body, req.user.id));
+};

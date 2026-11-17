@@ -48,6 +48,9 @@ describe('99acres payload mapper', () => {
       mobile: '+919876543210',
       email: 'buyer@example.com',
       propertyName: property.name,
+      externalPropertyId: '99-PROPERTY-1',
+      externalPropertyName: property.name,
+      externalPropertyUrl: undefined,
       source: '99ACRES',
       enquiryType: 'RENT',
       message: 'Interested in a 2 BHK',
@@ -72,6 +75,14 @@ describe('99acres payload mapper', () => {
     assert.equal(mapped.propertyName, 'Alias Heights');
     assert.equal(mapped.enquiryType, 'BUY');
     assert.match(mapped.externalLeadId ?? '', /^ac-fallback:[a-f0-9]{64}$/);
+  });
+
+  it('accepts 99acres sale type codes', () => {
+    const expected = { S: 'BUY', R: 'RENT', P: 'RENT', L: 'RENT' } as const;
+    for (const [code, canonical] of Object.entries(expected)) {
+      const mapped = map99acresPayload(payload({ leadId: `99-CODE-${code}`, enquiryType: code }));
+      assert.equal(mapped.enquiryType, canonical, `${code} should map to ${canonical}`);
+    }
   });
 
   it('rejects missing required fields and invalid values', () => {

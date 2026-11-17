@@ -66,3 +66,22 @@ export async function recordStatus(db: Db, a: { leadId: string; status: LeadStat
     executiveId: a.executiveId,
   });
 }
+
+export async function recordComment(db: Db, a: { leadId: string; comment: string; actorId: string; executiveId?: string | null }): Promise<ActivityRow> {
+  return repo.add(db, {
+    leadId: a.leadId,
+    type: 'COMMENT_ADDED',
+    message: a.comment,
+    actorId: a.actorId,
+    executiveId: a.executiveId,
+  });
+}
+
+export async function recordPropertyResolved(db: Db, a: { leadId: string; propertyName: string; actorId: string }): Promise<ActivityRow> {
+  return repo.add(db, {
+    leadId: a.leadId,
+    type: 'PROPERTY_RESOLVED',
+    message: `Property resolved to ${a.propertyName} by ${await nameOf(db, a.actorId)}`,
+    actorId: a.actorId,
+  });
+}
