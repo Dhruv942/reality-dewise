@@ -17,6 +17,8 @@ REST API for a real-estate lead desk. Enquiries from portals (99acres, Magicbric
 
 More detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (design, database, rules) and [`docs/FRONTEND_ROUND_ROBIN_GUIDE.md`](docs/FRONTEND_ROUND_ROBIN_GUIDE.md) (frontend guide: round robin lead assignment, the admin-only rule and 90-minute SLA settings, manual assignment, and every API involved, per role).
 
+The initial Zoho Mail OAuth callback setup is documented in [`docs/ZOHO_OAUTH_CALLBACK.md`](docs/ZOHO_OAUTH_CALLBACK.md). It currently acknowledges the callback only; token exchange and state verification are intentionally deferred.
+
 ---
 
 ## Quick start
