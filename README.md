@@ -277,9 +277,18 @@ npm run migrate:up      # before starting the new version
 npm start               # node dist/src/server.js
 ```
 
-Set `NODE_ENV=production`, `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS` (your frontend URL) and `TRUST_PROXY=1` behind a proxy. Run `npm run seed:prod` once to create the first admin. `GET /health` is the health check. Free-tier hosts sleep when idle, so the first request can be slow.
+Set `NODE_ENV=production`, `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS` (your frontend URL) and `TRUST_PROXY=1` behind a proxy. Run `npm run seed:prod` once to create the first admin. `GET /health` is the readiness check (includes the database); `GET /health/live` is a liveness check that never touches the database. Run exactly one instance (Socket.IO rooms are in memory). Set `MAGICBRICKS_WEBHOOK_SECRET` / `ACRES99_WEBHOOK_SECRET` so the portal webhooks are authenticated. Every webhook body is stored in `webhook_events` before validation (status `PROCESSED`, `DUPLICATE` or `FAILED` with the error), so rejected payloads can be inspected: `SELECT received_at, source, error, payload FROM webhook_events WHERE status = 'FAILED' ORDER BY received_at DESC;`. Free-tier hosts sleep when idle, so the first request can be slow.
 
 For Zoho Mail, also set `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REDIRECT_URI`, `ZOHO_ACCOUNTS_BASE_URL`, `ZOHO_MAIL_BASE_URL`, `ZOHO_TOKEN_ENCRYPTION_KEY` and `FRONTEND_URL`. Apply migrations before starting the service. Use the same Zoho data-center region for the Accounts and Mail URLs; for India these are `https://accounts.zoho.in` and `https://mail.zoho.in`. The registered redirect URI remains `https://reality-dewise.onrender.com/api/v1/auth/zoho/callback`. The worker runs inside the API process and uses PostgreSQL-backed jobs, so queued records survive a Render restart.
+
+### Docker
+
+```bash
+JWT_SECRET=$(openssl rand -hex 48) POSTGRES_PASSWORD=change-me docker compose up -d --build
+docker compose run --rm -e SEED_ADMIN_PASSWORD=... api node dist/seed/seed-users.js   # first admin, once
+```
+
+The image runs as a non-root user, applies pending migrations on start (`RUN_MIGRATIONS=false` to skip) and has a liveness healthcheck. Put `CORS_ORIGINS`, webhook secrets, VAPID and Zoho settings in `.env` (the compose file reads it). Use `API_PORT` to change the host port (default 4000). Run exactly one `api` container, and back up the `pgdata` volume or use a managed Postgres (set `DATABASE_URL` and drop the `db` service).
 
 ## Troubleshooting
 

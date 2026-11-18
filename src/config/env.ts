@@ -27,6 +27,17 @@ const schema = z.object({
   VAPID_PRIVATE_KEY: z.string().min(1).optional(),
   /** A contact for the push services, e.g. "mailto:ops@example.com". */
   VAPID_SUBJECT: z.string().min(1).optional(),
+  /** Shared secrets for the portal webhooks (header `x-webhook-secret`, `Authorization: Bearer` or `?token=`). Unset = open (warned at startup in production). */
+  MAGICBRICKS_WEBHOOK_SECRET: z.string().min(16, 'MAGICBRICKS_WEBHOOK_SECRET must be at least 16 characters').optional(),
+  ACRES99_WEBHOOK_SECRET: z.string().min(16, 'ACRES99_WEBHOOK_SECRET must be at least 16 characters').optional(),
+  /** Requests per minute per IP on each portal webhook. Portals send from few IPs, so keep this generous. */
+  WEBHOOK_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(300),
+  /** Postgres per-statement and idle-in-transaction limits (ms) so a stuck query cannot hold a connection or lock forever. */
+  DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30_000),
+  /** Force-exit deadline (ms) for a graceful shutdown. */
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10_000),
+  /** Node keep-alive timeout (ms). Keep it ABOVE the reverse proxy's idle timeout (commonly 60s) to avoid 502s. */
+  KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().min(1000).default(65_000),
   LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   LOGIN_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().min(1).default(15),
   ZOHO_CLIENT_ID: z.string().min(1).optional(),

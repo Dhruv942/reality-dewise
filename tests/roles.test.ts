@@ -271,7 +271,7 @@ describe('lead assignment by admin and manager', () => {
     const r = await callMA(`/manager/leads/${l.id}/assign`, 'PATCH', { executiveId: a2.id });
     assert.equal(r.body.status, 'CONNECTED', 'status kept');
     assert.equal(r.body.isNew, true);
-    assert.equal((await callA1(`/executive/leads/${l.id}`)).status, 404, 'old executive no longer has it');
+    assert.equal((await callA1(`/executive/leads/${l.id}`)).status, 200, 'old executive can read historical lead context');
     const mine = await callA2(`/executive/leads/${l.id}`);
     assert.equal(mine.status, 200);
     assert.deepEqual((await historyOf(l.id)).map((h) => h.method), ['ROUND_ROBIN', 'MANUAL']);

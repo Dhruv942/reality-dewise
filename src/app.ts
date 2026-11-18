@@ -21,9 +21,9 @@ import { zohoIntegrationRouter } from './modules/zoho/zoho.routes';
 export interface AppOptions {
   /** Override the failed-login limit (tests). Defaults to LOGIN_RATE_LIMIT_MAX. */
   loginRateLimitMax?: number;
-  /** Override the public Magicbricks webhook limit (tests). Defaults to 60 requests/minute/IP. */
+  /** Override the public Magicbricks webhook limit (tests). Defaults to WEBHOOK_RATE_LIMIT_MAX requests/minute/IP. */
   magicbricksRateLimitMax?: number;
-  /** Override the public 99acres webhook limit (tests). Defaults to 60 requests/minute/IP. */
+  /** Override the public 99acres webhook limit (tests). Defaults to WEBHOOK_RATE_LIMIT_MAX requests/minute/IP. */
   acres99RateLimitMax?: number;
 }
 
@@ -54,6 +54,10 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
   app.use('/api/v1/webhooks/99acres', express.json({ limit: '32kb', strict: true }), create99acresRouter(options.acres99RateLimitMax));
   app.use(express.json({ limit: '100kb', strict: true }));
 
+  // Liveness: the process is up (no database). /health is readiness: it also checks the database.
+  app.get('/health/live', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
   app.get('/health', async (_req, res) => {
     try {
       await pool.query('SELECT 1');

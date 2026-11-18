@@ -5,6 +5,9 @@ export const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: env.DB_POOL_MAX,
   connectionTimeoutMillis: 10_000, // fail a request instead of waiting forever for a connection
+  // A stuck query or an abandoned open transaction must not hold a connection or row locks indefinitely.
+  statement_timeout: env.DB_STATEMENT_TIMEOUT_MS,
+  idle_in_transaction_session_timeout: env.DB_STATEMENT_TIMEOUT_MS,
 });
 
 // A dropped idle connection (DB restart, failover, idle reaping) emits 'error' on the pool.

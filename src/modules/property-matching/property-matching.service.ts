@@ -40,7 +40,7 @@ export async function matchProperty(input: PropertyMatchInput, db?: Db): Promise
   if (exactProperties.length === 1) return matched('NORMALIZED_NAME', { id: exactProperties[0].id, name: exactProperties[0].name });
   if (exactProperties.length > 1) return { status: 'AMBIGUOUS', method: 'AMBIGUOUS', property: null, confidence: null, candidates: exactProperties.map((p) => ({ id: p.id, name: p.name, confidence: 1, matchMethod: 'NORMALIZED_NAME' })) };
 
-  const activeProperties = await propertyRepo.list({ isActive: true });
+  const activeProperties = await propertyRepo.list({ isActive: true }, db);
   const fuzzy = fuzzyCandidates(normalized, activeProperties.map((p) => ({ id: p.id, name: p.name })));
   if (fuzzy.status === 'MATCHED') return matched('FUZZY_NAME', { id: fuzzy.candidates[0].id, name: fuzzy.candidates[0].name }, fuzzy.candidates[0].confidence ?? 0);
   return { status: fuzzy.status, method: fuzzy.status === 'AMBIGUOUS' ? 'AMBIGUOUS' : 'UNMATCHED', property: null, confidence: fuzzy.candidates[0]?.confidence ?? null, candidates: fuzzy.candidates };

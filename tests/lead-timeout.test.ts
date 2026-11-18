@@ -39,7 +39,7 @@ before(async () => {
 after(() => t.close());
 // Tests that evaluate the SLA at fixed moments (Dec 2025 - Feb 2026) leave leads with old assignment times behind.
 // Close them so a later sweep, evaluated at another fixed moment, never picks them up again.
-afterEach(() => pool.query("UPDATE leads SET status = 'CLOSED' WHERE assigned_at < '2026-03-01'"));
+afterEach(() => pool.query("UPDATE leads SET status = 'CLOSED', status_reason = NULL, status_reason_other = NULL WHERE assigned_at < '2026-03-01'"));
 
 describe('lead SLA setting (admin only, default 90 minutes)', () => {
   it('the default is 90 minutes', async () => {
@@ -184,7 +184,8 @@ describe('timeout: handled leads are left alone', () => {
     for (const status of ['RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'BROKER']) {
       const l = await lead(p.name);
       const who = l.assignedExecutive.id === a.id ? callA : callB;
-      assert.equal((await who(`/executive/leads/${l.id}/status`, 'PATCH', { status })).status, 200);
+      const reason = status === 'LOST' ? { reason: 'BUDGET_ISSUE' } : {};
+      assert.equal((await who(`/executive/leads/${l.id}/status`, 'PATCH', { status, ...reason })).status, 200);
       await backdate(l.id, 1000);
       const before = (await row(l.id)).exec;
       await runLeadTimeoutSweep();
@@ -267,7 +268,7 @@ describe('timeout: the new executive is notified', () => {
     assert.equal(mine.assignedExecutive.id, b.id);
     assert.equal((await callB('/executive/leads/summary')).body.newLeads, newBefore + 1, 'badge count');
     assert.ok((await callB(`/executive/leads?assignedSince=${encodeURIComponent(marker)}`)).body.some((x: any) => x.id === l.id), 'polling sees it');
-    assert.equal((await callA(`/executive/leads/${l.id}`)).status, 404, 'a no longer has it');
+    assert.equal((await callA(`/executive/leads/${l.id}`)).status, 200, 'a can still read historical lead context');
     assert.equal((await callA('/executive/leads')).body.some((x: any) => x.id === l.id), false);
     assert.equal((await callB(`/executive/leads/${l.id}`)).body.isNew, false, 'opening clears it, as usual');
   });
@@ -417,7 +418,8 @@ describe('SLA: it only runs while the lead is INCOMING', () => {
       const who = l.assignedExecutive.id === a.id ? callA : callB;
       const start = '2026-02-11T09:00:00Z';
       await assignedAt(l.id, start);
-      assert.equal((await who(`/executive/leads/${l.id}/status`, 'PATCH', { status })).status, 200, status);
+      const reason = status === 'LOST' ? { reason: 'BUDGET_ISSUE' } : {};
+      assert.equal((await who(`/executive/leads/${l.id}/status`, 'PATCH', { status, ...reason })).status, 200, status);
       const holder = (await row(l.id)).exec;
       assert.equal((await runLeadTimeoutSweep(500, at(start, 90 * 20))).reassigned >= 0, true);
       assert.equal((await row(l.id)).exec, holder, `${status}: stays put after 30 hours`);

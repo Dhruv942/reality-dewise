@@ -24,6 +24,12 @@ const invalid = (field: string, message: string): never => {
   throw new ValidationError([{ field, message }]);
 };
 
+/**
+ * Without a vendor id or timestamp there is nothing to dedupe a portal retry against, so the same enquiry
+ * (mobile + property + type + message) received within the same clock hour is treated as one lead.
+ */
+const hourBucket = (): Date => new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000);
+
 const fallbackId = (values: { mobile: string; propertyName: string; message?: string | null; enquiryType?: string | null; createdAt: Date }) => {
   const input = JSON.stringify({
     mobile: values.mobile,
@@ -92,7 +98,7 @@ export function mapMagicbricksPayload(payload: unknown): NewLeadInput {
     source: 'MAGICBRICKS',
     enquiryType,
     message,
-    externalLeadId: externalLeadId ?? (externalCreatedAt ? fallbackId({ mobile, propertyName, message, enquiryType, createdAt: externalCreatedAt }) : undefined),
+    externalLeadId: externalLeadId ?? fallbackId({ mobile, propertyName, message, enquiryType, createdAt: externalCreatedAt ?? hourBucket() }),
     externalCreatedAt,
     rawPayload: payload,
   };

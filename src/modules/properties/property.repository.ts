@@ -71,7 +71,7 @@ export async function findOrCreateStub(db: Db, name: string): Promise<{ id: stri
   return { id: rows[0].id, created: false };
 }
 
-export async function list(f: { isActive?: boolean; assigned?: boolean; search?: string; projectId?: string; transactionType?: string; propertyType?: string; status?: string }): Promise<PropertyRow[]> {
+export async function list(f: { isActive?: boolean; assigned?: boolean; search?: string; projectId?: string; transactionType?: string; propertyType?: string; status?: string }, db: Db = pool): Promise<PropertyRow[]> {
   const where: string[] = [];
   const params: unknown[] = [];
   if (f.isActive !== undefined) where.push(`p.is_active = $${params.push(f.isActive)}`);
@@ -87,7 +87,7 @@ export async function list(f: { isActive?: boolean; assigned?: boolean; search?:
   if (f.status === 'ACTIVE') where.push('p.archived_at IS NULL');
   const sql = `SELECT * FROM (${SELECT}) p ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
                ORDER BY lower(p.name), p.id`;
-  return (await pool.query<PropertyRow>(sql, params)).rows;
+  return (await db.query<PropertyRow>(sql, params)).rows;
 }
 
 export const updateDetails = (

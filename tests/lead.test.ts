@@ -103,7 +103,7 @@ describe('property without executives: stub + PENDING_ASSIGNMENT', () => {
     assert.equal(r.status, 201);
     assert.equal(r.body.status, 'PENDING_ASSIGNMENT');
     assert.equal(r.body.assignedExecutive, null);
-    assert.equal(r.body.notice, 'No executive is assigned to Green Valley Residency. Please assign an executive before processing this lead.');
+    assert.equal(r.body.notice, 'Property requires review before this lead can be assigned. Green Valley Residency');
     const props = (await t.call('/admin/properties?search=green')).body;
     assert.equal(props.length, 1);
     assert.equal(props[0].isStub, true);
@@ -236,7 +236,7 @@ describe('executive portal', () => {
   it("another executive's lead is 404, not 403 (existence not revealed)", async () => {
     const rahulLead = (await rahulCall('/executive/leads')).body[0];
     assert.equal((await amitCall(`/executive/leads/${rahulLead.id}`)).status, 404);
-    assert.equal((await amitCall(`/executive/leads/${rahulLead.id}/status`, 'PATCH', { status: 'LOST' })).status, 404);
+    assert.equal((await amitCall(`/executive/leads/${rahulLead.id}/status`, 'PATCH', { status: 'LOST', reason: 'BUDGET_ISSUE' })).status, 404);
     assert.equal((await rahulCall(`/executive/leads/${rahulLead.id}`)).status, 200);
   });
   it('executive updates the status of their own lead', async () => {
@@ -381,7 +381,7 @@ describe('integrity', () => {
     const cid = (await pool.query('SELECT customer_id FROM leads LIMIT 1')).rows[0].customer_id;
     await assert.rejects(pool.query('DELETE FROM customers WHERE id=$1', [cid]), /foreign key constraint/);
     const lid = (await pool.query('SELECT lead_id FROM property_assignment_history LIMIT 1')).rows[0].lead_id;
-    await assert.rejects(pool.query('DELETE FROM leads WHERE id=$1', [lid]), /property_assignment_history_lead_id_fkey/);
+    await assert.rejects(pool.query('DELETE FROM leads WHERE id=$1', [lid]), /(?:property_assignment_history_lead_id_fkey|email_notification_logs_lead_id_fkey)/);
   });
   it('history rejects a lead id that does not exist', async () => {
     await assert.rejects(

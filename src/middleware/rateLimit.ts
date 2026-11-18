@@ -18,7 +18,7 @@ export const createLoginLimiter = (max: number = env.LOGIN_RATE_LIMIT_MAX) =>
   });
 
 /** Public webhook protection. This is abuse control, not sender authentication. */
-export const createMagicbricksLimiter = (max = 60) =>
+export const createMagicbricksLimiter = (max = env.WEBHOOK_RATE_LIMIT_MAX) =>
   rateLimit({
     windowMs: 60_000,
     limit: max,
@@ -29,7 +29,7 @@ export const createMagicbricksLimiter = (max = 60) =>
     },
   });
 
-export const create99acresLimiter = (max = 60) =>
+export const create99acresLimiter = (max = env.WEBHOOK_RATE_LIMIT_MAX) =>
   rateLimit({
     windowMs: 60_000,
     limit: max,

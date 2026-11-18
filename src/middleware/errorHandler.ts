@@ -10,7 +10,7 @@ const UNIQUE_MESSAGES: Record<string, string> = {
 
 export const notFoundHandler: RequestHandler = (_req, _res, next) => next(new NotFoundError('Route not found'));
 
-export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       success: false,
@@ -46,6 +46,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
-  console.error('Unhandled error:', err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error');
+  // The stack is logged (never the request body or headers, which carry customer data and tokens).
+  console.error(`Unhandled error on ${req.method} ${req.path}:`, err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : 'unknown error');
   res.status(500).json({ success: false, message: 'Internal server error' });
 };

@@ -1,0 +1,40 @@
+# One API instance + Postgres. Run exactly one api container (Socket.IO rooms are in memory).
+#   JWT_SECRET=$(openssl rand -hex 48) POSTGRES_PASSWORD=change-me docker compose up -d --build
+#   docker compose run --rm -e SEED_ADMIN_PASSWORD=... api node dist/seed/seed-users.js   # first admin, once
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: realestate_crm
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d realestate_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Optional .env for CORS_ORIGINS, webhook secrets, VAPID keys, Zoho settings, etc. Values below win over it.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://crm:${POSTGRES_PASSWORD}@db:5432/realestate_crm
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (openssl rand -hex 48)}
+    ports:
+      - "${API_PORT:-4000}:4000"
+    stop_grace_period: 15s
+
+volumes:
+  pgdata:
