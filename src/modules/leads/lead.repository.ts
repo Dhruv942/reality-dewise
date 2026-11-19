@@ -3,7 +3,7 @@ import { patchRow } from '../../database/patch';
 import type { Db } from '../../database/transaction';
 import { escapeLike } from '../../utils/like';
 import type { PropertySource } from '../properties/property.model';
-import type { EnquiryType, LeadRow, LeadStatus, StatusReasonCode } from './lead.model';
+import type { EnquiryType, LeadRow, LeadStatus, LeadType, StatusReasonCode } from './lead.model';
 
 export const LEAD_EXTERNAL_UNIQUE = 'leads_source_external_lead_id_key';
 
@@ -12,7 +12,7 @@ const IMPORTANT = (viewer: string) =>
   `EXISTS (SELECT 1 FROM lead_important li WHERE li.lead_id = l.id AND li.user_id = ${viewer}::uuid)`;
 
 const select = (viewer: string) => `
-  SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.status_reason, l.status_reason_other, l.message, l.requirement, l.enquiry_type, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.external_property_id, l.external_property_name, l.external_property_url, l.property_match_status, l.property_match_method, l.property_match_confidence, l.property_match_candidates, l.property_review_manager_id, l.source, l.created_at, l.updated_at,
+  SELECT ${IMPORTANT(viewer)} AS is_important, l.id, l.lead_no, l.status, l.status_reason, l.status_reason_other, l.message, l.requirement, l.enquiry_type, l.lead_type, l.assigned_at, l.seen_at, l.budget, l.property_name AS requested_property_name, l.external_lead_id, l.external_property_id, l.external_property_name, l.external_property_url, l.property_match_status, l.property_match_method, l.property_match_confidence, l.property_match_candidates, l.property_review_manager_id, l.source, l.manual_sub_source, l.created_at, l.updated_at,
          l.follow_up_at, l.follow_up_note, l.follow_up_updated_by, fu.name AS follow_up_updated_by_name, l.follow_up_updated_at,
          c.id AS customer_id, c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email,
          p.id AS property_id, p.name AS property_name, p.location AS property_location,
@@ -145,6 +145,8 @@ export async function insert(
     customerId: string;
     propertyId: string;
     source: PropertySource;
+    manualSubSource: string | null;
+    leadType: LeadType | null;
     message: string | null;
     requirement: string | null;
     enquiryType: EnquiryType | null;
@@ -164,10 +166,10 @@ export async function insert(
   },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO leads (customer_id, property_id, source, status, message, requirement, enquiry_type, budget, property_name, external_lead_id, external_created_at, raw_payload,
+    `INSERT INTO leads (customer_id, property_id, source, manual_sub_source, lead_type, status, message, requirement, enquiry_type, budget, property_name, external_lead_id, external_created_at, raw_payload,
       external_property_id, external_property_name, external_property_url, property_match_status, property_match_method, property_match_confidence, property_match_candidates, property_review_manager_id)
-     VALUES ($1, $2, $3, 'PENDING_ASSIGNMENT', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
-    [l.customerId, l.propertyId, l.source, l.message, l.requirement, l.enquiryType, l.budget, l.propertyName, l.externalLeadId, l.externalCreatedAt, l.rawPayload ?? null, l.externalPropertyId, l.externalPropertyName, l.externalPropertyUrl, l.propertyMatchStatus, l.propertyMatchMethod, l.propertyMatchConfidence, l.propertyMatchCandidates == null ? null : JSON.stringify(l.propertyMatchCandidates), l.propertyReviewManagerId],
+     VALUES ($1, $2, $3, $4, $5, 'PENDING_ASSIGNMENT', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id`,
+    [l.customerId, l.propertyId, l.source, l.manualSubSource, l.leadType, l.message, l.requirement, l.enquiryType, l.budget, l.propertyName, l.externalLeadId, l.externalCreatedAt, l.rawPayload ?? null, l.externalPropertyId, l.externalPropertyName, l.externalPropertyUrl, l.propertyMatchStatus, l.propertyMatchMethod, l.propertyMatchConfidence, l.propertyMatchCandidates == null ? null : JSON.stringify(l.propertyMatchCandidates), l.propertyReviewManagerId],
   );
   return rows[0].id;
 }

@@ -9,8 +9,15 @@ export interface NotificationJob {
   sender_email: string | null;
   lead_no: string;
   customer_name: string;
+  customer_mobile: string;
+  customer_email: string | null;
   property_name: string;
+  project_name: string | null;
+  lead_type: string | null;
+  enquiry_type: string | null;
+  budget: string | null;
   source: string;
+  manual_sub_source: string | null;
   executive_name: string;
   assigned_at: Date;
   attempt_count: number;
@@ -40,8 +47,15 @@ export async function claim(limit = 10): Promise<NotificationJob[]> {
      RETURNING n.id, n.lead_id, n.executive_id, n.recipient_email, n.sender_email,
        (SELECT lead_no::text FROM leads WHERE id = n.lead_id) AS lead_no,
        (SELECT name FROM customers c JOIN leads l3 ON l3.customer_id = c.id WHERE l3.id = n.lead_id) AS customer_name,
+       (SELECT mobile FROM customers c JOIN leads l3 ON l3.customer_id = c.id WHERE l3.id = n.lead_id) AS customer_mobile,
+       (SELECT email FROM customers c JOIN leads l3 ON l3.customer_id = c.id WHERE l3.id = n.lead_id) AS customer_email,
        (SELECT name FROM properties p2 JOIN leads l2 ON l2.property_id = p2.id WHERE l2.id = n.lead_id) AS property_name,
+       (SELECT pr.name FROM projects pr JOIN properties p2 ON p2.project_id = pr.id JOIN leads l2 ON l2.property_id = p2.id WHERE l2.id = n.lead_id) AS project_name,
+       (SELECT lead_type FROM leads WHERE id = n.lead_id) AS lead_type,
+       (SELECT enquiry_type::text FROM leads WHERE id = n.lead_id) AS enquiry_type,
+       (SELECT budget::text FROM leads WHERE id = n.lead_id) AS budget,
        (SELECT source::text FROM leads WHERE id = n.lead_id) AS source,
+       (SELECT manual_sub_source FROM leads WHERE id = n.lead_id) AS manual_sub_source,
        (SELECT name FROM users WHERE id = n.executive_id) AS executive_name,
        n.assignment_created_at AS assigned_at,
        n.attempt_count`,

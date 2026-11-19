@@ -104,11 +104,16 @@ describe('CORS + security headers', () => {
   it('sets security headers and hides x-powered-by', async () => {
     const { s, base } = listen(createApp());
     try {
-      const res = await fetch(`${base}/health`);
+      const res = await fetch(`${base}/api/v1/auth/admin/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
       assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
       assert.ok(res.headers.get('strict-transport-security'));
       assert.ok(res.headers.get('x-frame-options'));
       assert.equal(res.headers.get('x-powered-by'), null);
+      assert.equal(res.headers.get('cache-control'), 'no-store');
     } finally { s.close(); }
   });
 });

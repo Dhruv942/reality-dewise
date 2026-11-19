@@ -30,6 +30,21 @@ const bandFor = (price: number): Exclude<PriceBand, 'UNKNOWN' | 'MIXED'> => {
   return 'ABOVE_8_CR';
 };
 
+/**
+ * The SQL equivalent of classifyPriceBand for report aggregation. Keep this next to the
+ * application classifier so filters and grouped report rows use the same boundaries.
+ */
+export const priceBandSql = (column: string): string => `(CASE
+  WHEN ${column} IS NULL THEN 'UNKNOWN'
+  WHEN ${column} < 100000 THEN 'THOUSANDS'
+  WHEN ${column} < 10000000 THEN 'LAKHS'
+  WHEN ${column} <= 20000000 THEN 'UP_TO_2_CR'
+  WHEN ${column} <= 40000000 THEN 'ABOVE_2_TO_4_CR'
+  WHEN ${column} <= 60000000 THEN 'ABOVE_4_TO_6_CR'
+  WHEN ${column} <= 80000000 THEN 'ABOVE_6_TO_8_CR'
+  ELSE 'ABOVE_8_CR'
+END)`;
+
 export function classifyPriceBand(minimum?: number | null, maximum?: number | null): PriceBand {
   if (minimum !== null && minimum !== undefined && minimum < 0) throw new Error('Price cannot be negative');
   if (maximum !== null && maximum !== undefined && maximum < 0) throw new Error('Price cannot be negative');

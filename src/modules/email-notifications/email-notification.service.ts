@@ -22,7 +22,7 @@ export async function processPending(limit = 10): Promise<{ sent: number; failed
   let failed = 0;
   for (const job of await repo.claim(limit)) {
     try {
-      const template = assignmentEmail({ executiveName: job.executive_name, leadName: job.customer_name, leadNo: job.lead_no, propertyName: job.property_name, source: job.source, assignedAt: job.assigned_at ?? new Date() });
+      const template = assignmentEmail({ executiveName: job.executive_name, leadName: job.customer_name, leadNo: job.lead_no, leadType: job.lead_type, mobile: job.customer_mobile, email: job.customer_email, projectName: job.project_name, propertyName: job.property_name, enquiryType: job.enquiry_type, budget: job.budget, source: job.source === 'MANUAL' && job.manual_sub_source ? `MANUAL (${job.manual_sub_source})` : job.source, assignedAt: job.assigned_at ?? new Date() });
       const result = await sendEmail({ toAddress: job.recipient_email, subject: template.subject, htmlContent: template.htmlContent, textContent: template.textContent });
       const integration = (await pool.query<{ sender_email: string }>('SELECT sender_email FROM zoho_mail_integrations WHERE singleton_key = true', [])).rows[0];
       await repo.markSent(job.id, integration?.sender_email ?? '', result.providerMessageId);

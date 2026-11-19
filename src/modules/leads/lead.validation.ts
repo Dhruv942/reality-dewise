@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { customerEmail, customerMobile, customerName } from '../customers/customer.validation';
-import { PROPERTY_SOURCES } from '../properties/property.model';
-import { ENQUIRY_TYPES, INVALID_REASONS, LEAD_STATUSES, LOST_REASONS, PIPELINE_STATUSES, STATUS_REASONS, isValidTimeZone } from './lead.model';
+import { MANUAL_LEAD_SUB_SOURCES, PROPERTY_SOURCES } from '../properties/property.model';
+import { ENQUIRY_TYPES, INVALID_REASONS, LEAD_STATUSES, LEAD_TYPES, LOST_REASONS, PIPELINE_STATUSES, STATUS_REASONS, isValidTimeZone } from './lead.model';
 
 export const idParam = z.object({ id: z.uuid('Invalid id') });
 
@@ -19,6 +19,7 @@ export const createLeadSchema = z.strictObject({
     .trim()
     .toUpperCase()
     .pipe(z.enum(PROPERTY_SOURCES, { error: `Source must be one of: ${PROPERTY_SOURCES.join(', ')}` })),
+  manualSubSource: z.enum(MANUAL_LEAD_SUB_SOURCES).nullish(),
   // What the client wants, e.g. "3 BHK on Rent".
   requirement: z.string().trim().max(200).nullish(),
   // Does the client want to rent or buy? Optional; case-insensitive.
@@ -28,9 +29,14 @@ export const createLeadSchema = z.strictObject({
     .toUpperCase()
     .pipe(z.enum(ENQUIRY_TYPES, { error: `Enquiry type must be one of: ${ENQUIRY_TYPES.join(', ')}` }))
     .nullish(),
+  leadType: z.enum(LEAD_TYPES).nullish(),
   budget: z.number({ error: 'Budget must be a number (in rupees)' }).min(0).max(1e12).nullish(),
   message: z.string().trim().max(2000).nullish(),
   externalLeadId: z.string().trim().min(1).max(100).nullish(),
+}).superRefine((value, ctx) => {
+  if (value.source !== 'MANUAL' && value.manualSubSource !== undefined && value.manualSubSource !== null) {
+    ctx.addIssue({ code: 'custom', path: ['manualSubSource'], message: 'manualSubSource is only valid for MANUAL leads' });
+  }
 });
 
 /** A manager adds a lead and must give it to one of their own sales users. */

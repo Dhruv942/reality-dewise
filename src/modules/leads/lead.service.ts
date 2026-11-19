@@ -16,7 +16,7 @@ import * as activityRepo from './lead-activity.repository';
 import type { ActivityRow } from './lead-activity.repository';
 import { recordAssigned, recordComment, recordPropertyResolved, recordReceived, recordStatus, recordTimeout, recordTransferred } from './lead-activity.service';
 import { publishAssignment, publishCommentAdded, publishLeadCreated, publishSlaReassignment, publishSlaWarning, publishStatusUpdated } from './lead.events';
-import { toLeadDto, type EnquiryType, type LeadStatus, type StatusReasonCode } from './lead.model';
+import { toLeadDto, type EnquiryType, type LeadStatus, type LeadType, type StatusReasonCode } from './lead.model';
 import { matchProperty } from '../property-matching/property-matching.service';
 import * as mappingRepo from '../property-mappings/property-mapping.repository';
 import { normalizePropertyName } from '../property-matching/matching.policy';
@@ -28,6 +28,7 @@ export interface NewLeadInput {
   /** Name as the portal sent it. Matched to an existing property, or a stub is created once. */
   propertyName: string;
   source: PropertySource;
+  manualSubSource?: import('../properties/property.model').ManualLeadSubSource | null;
   externalPropertyId?: string | null;
   externalPropertyName?: string | null;
   externalPropertyUrl?: string | null;
@@ -35,6 +36,7 @@ export interface NewLeadInput {
   requirement?: string | null;
   /** Does the client want to rent or buy? Optional. */
   enquiryType?: EnquiryType | null;
+  leadType?: LeadType | null;
   message?: string | null;
   /** Portal's own enquiry id. When given, submitting the same one again returns the existing lead. */
   externalLeadId?: string | null;
@@ -100,6 +102,8 @@ export async function createLead(input: NewLeadInput, viewerId?: string) {
         customerId: customer.id,
         propertyId: property.id,
         source,
+        manualSubSource: input.manualSubSource ?? null,
+        leadType: input.leadType ?? null,
         message: input.message ?? null,
         requirement: input.requirement ?? null,
         enquiryType: input.enquiryType ?? null,

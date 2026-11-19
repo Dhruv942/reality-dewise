@@ -68,6 +68,14 @@ export function createApp(mount?: (api: Router) => void, options: AppOptions = {
   });
 
   const api = express.Router();
+  // CRM data is highly mutable (lead status, assignee and follow-up fields). Do not let a
+  // browser or an intermediary reuse an older GET response after a mutation. The frontend
+  // remains responsible for refreshing its local state, but the API must never advertise
+  // mutable lead data as cacheable.
+  api.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   api.use('/auth', createAuthRouter(createLoginLimiter(options.loginRateLimitMax)));
   api.use('/integrations/zoho', zohoIntegrationRouter);
   api.use('/admin', adminRouter);

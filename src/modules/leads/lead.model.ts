@@ -1,4 +1,4 @@
-import type { PropertySource } from '../properties/property.model';
+import type { ManualLeadSubSource, PropertySource } from '../properties/property.model';
 
 export const LEAD_STATUSES = ['PENDING_ASSIGNMENT', 'INCOMING', 'RINGING', 'CONNECTED', 'CLOSED', 'LOST', 'INVALID', 'BROKER'] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
@@ -9,8 +9,10 @@ export type StatusReasonCode = (typeof INVALID_REASONS)[number] | (typeof LOST_R
 /** Statuses a person may set. PENDING_ASSIGNMENT is system-managed: it ends when an executive is assigned. */
 export const PIPELINE_STATUSES = LEAD_STATUSES.filter((s) => s !== 'PENDING_ASSIGNMENT') as Exclude<LeadStatus, 'PENDING_ASSIGNMENT'>[];
 
-export const ENQUIRY_TYPES = ['RENT', 'BUY'] as const;
+export const ENQUIRY_TYPES = ['RENT', 'BUY', 'PROJECT'] as const;
 export type EnquiryType = (typeof ENQUIRY_TYPES)[number];
+export const LEAD_TYPES = ['INDIVIDUAL', 'BROKER_AGENT'] as const;
+export type LeadType = (typeof LEAD_TYPES)[number];
 
 export interface LeadRow {
   id: string;
@@ -24,6 +26,7 @@ export interface LeadRow {
   assigned_at: Date | null;
   seen_at: Date | null;
   enquiry_type: EnquiryType | null;
+  lead_type: LeadType | null;
   budget: string | null; // numeric comes back from pg as a string
   requested_property_name: string | null;
   external_lead_id: string | null;
@@ -36,6 +39,7 @@ export interface LeadRow {
   property_match_candidates: unknown;
   property_review_manager_id: string | null;
   source: PropertySource;
+  manual_sub_source: ManualLeadSubSource | null;
   created_at: Date;
   updated_at: Date;
   customer_id: string;
@@ -92,6 +96,7 @@ export const toLeadDto = (l: LeadRow, tz = 'UTC') => ({
   requirement: l.requirement,
   // Whether the client wants to rent or buy. null when the enquiry did not say.
   enquiryType: l.enquiry_type,
+  leadType: l.lead_type,
   budget: l.budget === null ? null : Number(l.budget),
   requestedPropertyName: l.requested_property_name,
   externalLeadId: l.external_lead_id,
@@ -108,6 +113,7 @@ export const toLeadDto = (l: LeadRow, tz = 'UTC') => ({
     reviewManagerId: l.property_review_manager_id,
   },
   source: l.source,
+  manualSubSource: l.manual_sub_source,
   customer: { id: l.customer_id, name: l.customer_name, mobile: l.customer_mobile, email: l.customer_email },
   // The property the customer is asking about.
   property: {

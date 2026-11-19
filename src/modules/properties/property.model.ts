@@ -1,7 +1,10 @@
 import type { PriceBand, PropertyType, TransactionType } from '../catalog/catalog.policy';
 
-export const PROPERTY_SOURCES = ['99ACRES', 'MAGICBRICKS'] as const;
+export const PROPERTY_SOURCES = ['99ACRES', 'MAGICBRICKS', 'MANUAL'] as const;
 export type PropertySource = (typeof PROPERTY_SOURCES)[number];
+
+export const MANUAL_LEAD_SUB_SOURCES = ['WALK_IN', 'SOCIAL_MEDIA', 'REFERRAL', 'PHONE', 'OTHER'] as const;
+export type ManualLeadSubSource = (typeof MANUAL_LEAD_SUB_SOURCES)[number];
 
 export interface PropertyRow {
   id: string;

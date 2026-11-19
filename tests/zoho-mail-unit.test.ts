@@ -18,10 +18,19 @@ describe('Zoho Mail backend primitives', () => {
   });
 
   it('escapes dynamic email fields and produces a plaintext fallback', () => {
-    const email = assignmentEmail({ executiveName: '<A>', leadName: '<Customer>', leadNo: '12', propertyName: 'A & B', source: '99ACRES', assignedAt: new Date('2026-11-17T10:00:00Z') });
+    const email = assignmentEmail({
+      executiveName: '<A>', leadName: '<Customer>', leadNo: '12', leadType: 'BROKER_AGENT', mobile: '+919000012345', email: 'customer@example.com',
+      projectName: '<Project>', propertyName: 'A & B', enquiryType: 'PROJECT', budget: 2500000, source: 'MANUAL (WALK_IN)', assignedAt: new Date('2026-11-17T10:00:00Z'),
+    });
     assert.equal(email.htmlContent.includes('&lt;Customer&gt;'), true);
     assert.equal(email.htmlContent.includes('<Customer>'), false);
-    assert.equal(email.textContent.includes('Lead Name: <Customer>'), true);
+    assert.equal(email.textContent.includes('Name: <Customer>'), true);
+    assert.equal(email.textContent.includes('Type: BROKER_AGENT'), true);
+    assert.equal(email.textContent.includes('Number: +919000012345'), true);
+    assert.equal(email.textContent.includes('Email ID: customer@example.com'), true);
+    assert.equal(email.textContent.includes('Project Name: <Project>'), true);
+    assert.equal(email.textContent.includes('Enquiry: Project'), true);
+    assert.equal(email.textContent.includes('Budget: ₹25,00,000'), true);
     assert.equal(email.subject, 'New Lead Assigned | Realty Adwise CRM');
   });
 });
